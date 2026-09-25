@@ -9,17 +9,17 @@ broader product completion remain separately gated.
 Audience: compiler contributors, semantic-service implementers, and reviewers
 of exact source-owned ProgramRoot identity.
 
-ProgramRoot v3 binds one independently replayable
+ProgramRoot v3 adds one independently replayable
 [Contracts and Tests Facts v1](CONTRACTS-AND-TESTS-FACTS-V1.md) object to the
-complete existing ProgramRoot v2 association. It adds no contract proof, test
-coverage, test execution, runtime root, or authority.
+complete ProgramRoot v2 association. It proves no contract, coverage,
+execution, runtime root, or authority.
 
 ## Identity and inputs
 
-`ProgramRootV3::derive` accepts the same already-admitted workspace, default
-Project root, interface/artifact facts, and Project Lock association used to
-freshly derive ProgramRoot v2, plus one `ContractsAndTestsFacts` object for the
-same exact Project subject. A cross-Project fact bundle fails closed.
+`ProgramRootV3::derive` takes the admitted workspace, default Project root,
+interface/artifact facts, and Project Lock association needed to freshly derive
+v2, plus `ContractsAndTestsFacts` for that exact Project. Facts from another
+Project fail closed.
 
 The schema is `semaprax.program-root.v3`; compatibility is
 `extends-semaprax.program-root.v2`; and the complete canonical manifest is

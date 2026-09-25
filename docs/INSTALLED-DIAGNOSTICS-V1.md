@@ -6,12 +6,11 @@ Status: implemented authority-free installed projection; **HOSTED GREEN** under 
 Audience: compiler contributors, coding agents, CLI users, and reviewers of
 installed diagnostic identity.
 
-Installed Diagnostics v1 exposes a deterministic, compiler-version-matched
-catalogue of diagnostic code tokens present in the Rust sources used to build
-SEMAPRAX, plus an exact explanation of one installed code. It answers whether
-a canonical identifier occurs in the installed build's static source
-inventory. It does not infer runtime reachability, reconstruct site-specific
-messages, or claim a stable cross-version registry.
+Installed Diagnostics v1 lists diagnostic code tokens found in the Rust source
+used to build this compiler and explains one installed code exactly. The
+version-matched catalogue answers whether a canonical identifier occurs in
+that static inventory. It cannot prove runtime reachability, reconstruct a
+site-specific message, or promise stable identifiers across versions.
 
 The separate [Installed Fix Plan v1](INSTALLED-FIX-PLAN-V1.md) catalog states
 which installed diagnostic has a compiler-owned plan and can derive one exact

@@ -13,12 +13,11 @@ Audience: compiler contributors and language reviewers.
 
 ## Checked expression composition
 
-A generic owned-record function with one admitted owning record parameter and
-an admitted owning record result may compose record construction, recursive
-owning or borrowing record matches, Copy-field projection, record update,
-blocks, branches and generic calls. Existing generic scalar parameters and
-substitution bounds remain unchanged. Every materialized expression must also
-satisfy the ordinary concrete ownership rules.
+With one admitted owning record parameter and owning record result, a generic
+function may compose record construction, recursive owning or borrowing matches,
+Copy-field projection, record updates, blocks, branches, and generic calls.
+Scalar generic parameters and substitution bounds do not change. Every
+materialized expression still follows concrete ownership rules.
 
 Whether an expression is a top-level binding, a branch, a call argument or
 another record field does not grant or remove ownership authority. A source

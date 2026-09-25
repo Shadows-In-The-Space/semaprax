@@ -21,10 +21,10 @@ containment guarantee. Ordinary native resource compilation remains
 
 ## Scope and primitives
 
-This ABI is the metadata boundary for [RFC 0004](RFC-0004-NATIVE-CALL-SETTLEMENT.md).
-It binds one validated direct-trivial owned callable to its recovery graph,
-future `execute`/`settle` entry points, exact descriptor capacities, and a
-dynamic-image or iOS-static linkage role. The ordinary machine-code emitter
+This ABI supplies [RFC 0004](RFC-0004-NATIVE-CALL-SETTLEMENT.md)'s metadata
+boundary. It binds one validated direct-trivial owned callable to its recovery
+graph, future `execute`/`settle` entries, descriptor capacities, and dynamic-image or
+iOS-static linkage role. The ordinary machine-code emitter
 derives the physical target from the compiler's own build target and exposes no
 public/general cross-target configuration; a hidden closed selector emits
 complete target-bound evidence providers for five enumerated iOS targets and

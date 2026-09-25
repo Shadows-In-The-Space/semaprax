@@ -4,19 +4,14 @@ Status: living internal contributor documentation.
 
 Audience: compiler contributors, maintainers, reviewers, and coding agents.
 
-This page is the internal documentation entry point. Public users should start
-with the [documentation overview](index.md). Versioned specifications remain
-publicly readable, but documents marked private, proof-only, or internal do not
-describe supported product surfaces.
-
-New contributors and coding agents should read [first
-contribution](FIRST-CONTRIBUTION.md) alongside this page. It states no rule of
-its own: it supplies the concrete, ordered commands for a single change against
-the read order and change protocol this page owns.
+Use this page to find the contract and tests that own a change. New
+contributors should start with [First contribution](FIRST-CONTRIBUTION.md);
+language users should start with the [documentation overview](index.md).
+Private and proof-only references do not describe supported product surfaces.
 
 ## Read before changing semantics
 
-Read only the documents that own the facts relevant to the change:
+Read these owners before changing semantics:
 
 1. [RFC 0001](RFC-0001.md) for the long-term language and toolchain contract.
 2. [Completion matrix](COMPLETION-MATRIX.md) for the affected product rows and
@@ -26,9 +21,9 @@ Read only the documents that own the facts relevant to the change:
 5. The exact versioned specification that owns the changed syntax, protocol,
    ABI, report, or target profile.
 
-Use the [roadmap](ROADMAP.md) for sequencing only. Use the
-[changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md) for history only. Neither is implementation
-evidence.
+The [roadmap](ROADMAP.md) sequences work; the
+[changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md) records
+history. Neither proves that a feature works.
 
 Additional required references:
 
@@ -130,20 +125,27 @@ not by moving every established path.
 
 ## Repository navigation
 
-Use semantic tools before reconstructing program meaning from source text:
+Use Graft first to find the code owner:
+
+```sh
+graft map
+graft ask '<question or exact symbol>' --source
+```
+
+For an exhaustive search, use `graft grep`; ranked `ask` results are not
+exhaustive. Then use the compiler's semantic tools for checked `.spx` meaning:
 
 ```sh
 cargo run --locked -p semaprax -- graph <file>
 cargo run --locked -p semaprax -- context <file> <stable-id> --depth 1
 ```
 
-Use `rg`/`rg --files` for bounded source navigation. See
+Use `rg`/`rg --files` for bounded source navigation after graph context. See
 [ADR 0001](decisions/0001-graphify.md) before adding another repository-wide
-graph index.
+index.
 
-The [architecture](ARCHITECTURE.md) is the single repository module map.
-`AGENTS.md` contains operating invariants and routes contributors here instead
-of duplicating that map.
+The [architecture](ARCHITECTURE.md) owns the module map; `AGENTS.md` owns
+operating invariants.
 
 Before splitting a module, check whether a gate binds its text. `rg` the module's
 path across `tests/` and `crates/*/src` for `include_str!` and path reads: a hit

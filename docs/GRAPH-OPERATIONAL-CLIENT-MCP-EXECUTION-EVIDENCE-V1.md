@@ -6,9 +6,9 @@ passed and the ordinary run retained its one provisioned TypeScript ignore row.
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract defines a private, machine-readable local evidence bundle for the
-existing generated-client and workspace MCP tests. It is a sibling of
-`semaprax.graph-operational-execution-evidence.v1`; it does not amend, inherit,
+This private local bundle records the generated-client and workspace MCP tests
+in machine-readable form. It stands beside
+`semaprax.graph-operational-execution-evidence.v1`; it does not change, inherit,
 or promote the historical canonical-Git workflow result.
 
 ## Exact runner and subject

@@ -4,13 +4,10 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax c-header <file.spx>` is a deterministic, read-only projection that
-derives one C11 header from verified program facts for explicitly selected
-public monomorphic scalar functions. It is the first executable slice of the
-completion-matrix row "C and Objective-C" under Ecosystem interoperability.
-It imports no header, imports no raw binding, generates no safe wrapper,
-performs no Objective-C mapping, maps no strings or buffers, compiles
-nothing, executes nothing, and changes no source.
+`semaprax c-header <file.spx>` deterministically derives a C11 header from
+verified facts for selected public monomorphic scalar functions. It is read-only:
+no imports, wrappers, Objective-C/string/buffer mapping, compilation, execution,
+or source change.
 
 ## Command
 

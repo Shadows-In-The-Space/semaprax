@@ -30,18 +30,14 @@ current tree.
 
 ## Purpose and non-goals
 
-[SPX-AI-018](CATALOG-NORMALIZER-ORACLE-V1.md) freezes a catalog-normalizer
-record shape — `id: Bytes`, `label: Bytes`, `quantity` a bounded nonnegative
-integer — as the acceptance application's per-record payload. That document's
-own routing note states the application itself does not require a growable
-collection: batches are validated and re-emitted from bounded, re-scanned
-input, not accumulated into an owned `Vec` of records. This profile is
-therefore not on SPX-AI-025's (issue #124) critical path by that document's own
-design; it exists because [SPX-AI-020](https://github.com/wavect/semaprax/issues/119)
-("Execute owned-record collections on interpreter, C11 and Core Wasm") is a
-separate roadmap step that depends on #118 regardless, and because a bounded
-internal owned-record-in-a-collection profile is useful general language
-composition beyond this one application.
+[SPX-AI-018](CATALOG-NORMALIZER-ORACLE-V1.md) fixes the catalog-normalizer
+record as `id: Bytes`, `label: Bytes`, and a bounded nonnegative `quantity`.
+That application validates and re-emits bounded, re-scanned input; it does not
+need a growable `Vec` of records. This profile is therefore not on SPX-AI-025's
+(issue #124) critical path. It serves the separate
+[SPX-AI-020](https://github.com/wavect/semaprax/issues/119) roadmap step,
+which depends on #118, and supports bounded internal owned-record collections
+beyond this application.
 
 This is **not** a public generic ABI, not a change to
 [GENERIC-COMPILER-COLLECTIONS-V1](GENERIC-COMPILER-COLLECTIONS-V1.md)'s frozen

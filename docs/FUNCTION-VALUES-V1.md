@@ -20,10 +20,9 @@ Function values are Copy and carry no captured environment or cleanup owner.
 Pointer equality is not a source operation; callable equality rejects with
 `SPX-T207`. Unsupported callable signatures reject with `SPX-T287`.
 
-A bare name first resolves a lexical binding, then an eligible local function.
-An eligible reference identifies an ordinary monomorphic, effect-free function
-with the scalar signature above. Import, generic, method and capturing targets
-are excluded. Private monomorphic helpers may receive or return function values;
+A bare name first looks for a lexical binding, then an eligible local function.
+Eligible functions are ordinary, monomorphic and effect-free, with the scalar
+signature above. Imports, generics, methods and capturing targets are excluded. Private monomorphic helpers may receive or return function values;
 such higher-order helpers are not themselves eligible scalar function targets.
 Function types in public descriptors, stored record fields and generic
 substitutions remain outside this version.
@@ -41,11 +40,11 @@ module example.function_values;
 }
 ```
 
-Invoking a callable binding evaluates its value before arguments, then evaluates
-arguments once in left-to-right order. Argument types and result type exactly
-match the callable signature. Invocation uses the selected target's ordinary
-contracts, checked arithmetic and failure status. Failure remains sticky and
-result publication follows postconditions and cleanup.
+A callable invocation evaluates the callable value first, then each argument
+once from left to right. Argument and result types must exactly match the
+signature. The selected target's ordinary contracts, checked arithmetic and
+failure status apply. Failure stays sticky; results are published after
+postconditions and cleanup.
 
 ## Checked meaning and graph
 

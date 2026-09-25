@@ -6,10 +6,9 @@ General diagnostic/repair and public-support requirements remain separate.
 
 Audience: compiler users, editor authors, and compiler contributors.
 
-This additive rendering contract makes the source path already carried by a
-SEMAPRAX diagnostic visible in ordinary terminal output. It changes no
-diagnostic selection, severity, code, message, help, source span, exit status,
-or machine-readable JSON field.
+This contract displays a diagnostic's existing source path in terminal output.
+It changes neither diagnostic selection nor severity, code, message, help,
+source span, exit status, or machine-readable JSON fields.
 
 ## Human rendering
 
@@ -24,18 +23,16 @@ The location spelling is `path:line:column`. A path without a span renders as
 and a diagnostic with neither retains its prior output. Help remains on the
 following indented line.
 
-Control characters in a human-rendered path use deterministic Rust-style
-escapes, preventing a source filename from injecting terminal control
-sequences or extra diagnostic lines. Ordinary ASCII and Unicode path
-characters remain readable.
+The renderer escapes path control characters deterministically with Rust-style
+escapes. A filename therefore cannot inject terminal control sequences or extra
+diagnostic lines. Ordinary ASCII and Unicode path characters stay readable.
 
 ## Preservation and authority
 
-`Diagnostic::json()` is unchanged and remains the automation interface. Its
-`path`, `location`, and `help` fields retain their existing values and null
-behavior. Human locations are descriptive only: rendering a path does not
-read it, navigate to it, grant filesystem authority, or authenticate current
-source bytes.
+Use the unchanged `Diagnostic::json()` interface for automation. Its `path`,
+`location`, and `help` fields keep their existing values and null behavior.
+Human-readable locations only describe a path. Rendering one does not read or
+navigate to it, grant filesystem authority, or authenticate current source bytes.
 
 Executable evidence covers path plus span, path only, span only, absent
 locations, help placement, control-character escaping, unchanged JSON, and an

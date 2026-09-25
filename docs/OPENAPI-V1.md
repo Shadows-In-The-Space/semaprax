@@ -4,16 +4,14 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax openapi <file.spx>` is a deterministic, read-only projection that
-turns admitted function signatures of one verified module into a canonical
-OpenAPI 3.1 document, wrapped in a `semaprax.openapi.v1` envelope. The
-companion command `semaprax openapi-compat <base.json> <candidate.json>`
-classifies the difference between two previously generated envelopes into
-breaking, non-breaking, and informational findings under a
-`semaprax.openapi-compat.v1` report. Together they are an executable tranche
-of the completion-matrix row "OpenAPI, Protobuf/gRPC, GraphQL, and SQL". They
-import no schema language, run no conformance fixture, host no registry or
-server, execute no target, and change no source.
+`semaprax openapi <file.spx>` reads one verified module and renders its
+admitted signatures as canonical OpenAPI 3.1 in a `semaprax.openapi.v1`
+envelope. `semaprax openapi-compat <base.json> <candidate.json>` compares two
+such envelopes and reports breaking, non-breaking, and informational findings
+as `semaprax.openapi-compat.v1`. Both are deterministic and read-only. They
+cover a bounded part of the matrix's "OpenAPI, Protobuf/gRPC, GraphQL, and SQL"
+row: no imported schema language, conformance fixture, registry, server,
+target execution, or source change.
 
 ## Commands
 

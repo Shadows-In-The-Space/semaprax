@@ -1,45 +1,29 @@
 # Quickstart
 
-Audience: new SEMAPRAX users and contributors.
+Status: public alpha example, not a production-readiness claim.
+Audience: first-time SEMAPRAX users.
 
-Status: alpha bounded calculator workflow; not a production-readiness claim.
-
-This quickstart uses the standalone `semaprax` CLI to create the built-in
-calculator Project v1 template and then exercise it. Install it from the
-checkout root:
+From the repository root, install the standalone CLI:
 
 ```sh
 cargo install --locked --path .
 ```
 
-[Install](INSTALL.md) covers the prerequisites, the release-archive route,
-`PATH` setup, and what a first failed command means.
+If `semaprax` is not found, add Cargo's binary directory to `PATH`; see
+[Install](INSTALL.md) for prerequisites and release archives. Cargo may
+download Rust dependencies during installation. The commands below do not
+install project dependencies or initialize Git.
 
-Ensure Cargo's binary directory is on your `PATH`. Installation may fetch Rust
-dependencies. The project generator itself does not access a network,
-initialize Git, or install dependencies. The optional full toolchain
-(`cargo install --locked --path crates/semaprax-toolchain`) and the tag
-archives accept the same `new` grammar and create the same files; they publish
-through a held-parent staged rename instead of the standalone create-new route.
-
-To inspect or hand to another tool the exact calculator files without granting
-SEMAPRAX a destination or write authority, print the public scaffold capsule:
+To inspect the template without writing files, run:
 
 ```sh
 semaprax project-scaffold --name first-semaprax
 ```
 
-This writes one canonical `semaprax.project-scaffold.v2` document to stdout and
-does not materialize a project. The capsule is not a publication primitive; a
-consumer that writes its files owns that filesystem and publication policy.
+This prints a canonical scaffold document to stdout. It does not create a
+project or authorize another tool to publish one.
 
-The generator requires a fresh destination beneath an existing parent and
-never replaces an entry. The standalone route is owned by
-[standalone project creation](NEW-PROJECT-STANDALONE-V1.md) and the full
-toolchain's by [calculator project publication](NEW-PROJECT-PUBLICATION-V1.md);
-neither deletes a reported failure's output or residue automatically.
-
-From a directory where `first-semaprax` does not already exist, run:
+Next, from a directory that does not contain `first-semaprax`, run:
 
 ```sh
 semaprax new first-semaprax
@@ -51,17 +35,12 @@ semaprax graph semaprax.toml
 semaprax build semaprax.toml --target web -o dist/web
 ```
 
-The run command prints `42`. The graph command emits deterministic JSON for
-the authenticated project, including the generated application and its imported
-modules. The final command creates the single
-missing `dist` parent and publishes the Web package at `dist/web`.
+`run` prints `42`. `graph` prints deterministic JSON for the checked project.
+`build` creates `dist` if needed and writes the Web package to `dist/web`.
 
-SEMAPRAX remains alpha. This flow demonstrates the bounded calculator
-project contract; it is not a production-readiness or broader ecosystem claim.
-
-The executable quickstart suite's previously recorded nine tests passed locally on macOS arm64
-with Rust 1.98, including the seven-command flow and hostile output-parent
-cases. The additive stdout-only scaffold case also passed locally. That suite
-invokes freshly built CLI paths and checks the install instructions as text; it
-does not prove installation, `PATH` setup, release archives, or Windows
-behavior.
+`new` needs a fresh destination under an existing parent and never replaces an
+entry. A failed creation may leave files that need manual inspection; it never
+deletes them for you. The [standalone creation contract](NEW-PROJECT-STANDALONE-V1.md)
+defines this route. The optional full toolchain and release archives accept
+the same `new` arguments but use a different, staged publication route; see
+[calculator project publication](NEW-PROJECT-PUBLICATION-V1.md).

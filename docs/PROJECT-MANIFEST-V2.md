@@ -6,17 +6,18 @@ product status and public-support decisions.
 
 Audience: language users, tool authors, and compiler contributors.
 
-Project Manifest v2 is the implemented packaging profile for one Useful Text
-Consumer v1 project. The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md)
+Use Project Manifest v2 to package one Useful Text Consumer v1 project.
+The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md)
 supersedes the former exact-head hosted-pending classification.
 
 The canonical manifest adds required `version` and
-`profile = "useful-text-consumer.v1"` fields to the bounded Project authority.
-It retains explicit sorted sources, one entry module, one test module, and
-explicit stable-ID export roots. The existing held-file authentication,
-single in-memory Phase-A link, drift checks, and stable-ID rename behavior are
-unchanged. Project v1 parsing, builds, carriers, and output bytes remain
-unchanged.
+`profile = "useful-text-consumer.v1"` fields. Sources remain explicitly listed
+and sorted, with one entry module, one test module, and explicit stable-ID
+export roots. Held-file authentication, the single in-memory Phase-A link,
+drift checks, and stable-ID rename behavior stay the same, as do Project v1
+parsing, builds, carriers, and output bytes.
+
+## Package and build verification
 
 `semaprax build --manifest-path semaprax.toml --target npm -o <new-directory>`
 publishes an exact create-new six-file package:
@@ -28,13 +29,14 @@ publishes an exact create-new six-file package:
 - `semaprax.text-exports.json`
 - `package.json`
 
-The pathless `semaprax.project-npm-build.v1` carrier binds the Project schema,
-package/version, Project/workspace/graph revisions, exact artifact order,
+The `semaprax.project-npm-build.v1` carrier is a build record with no paths.
+It binds the Project schema, package/version, Project/workspace/graph revisions,
+exact artifact order,
 per-artifact bytes and digests, cumulative byte count, canonical semantic
-recipe, and payload digest. Context-free inspection independently replays that
-recipe through the real parser, resolver, text planner, and Wasm emitter and
-proves compiler consistency, but it does not authenticate self-claimed Project
-facts or create publication authority. Only the opaque build prepared by a
+recipe, and payload digest. Inspection replays the recipe through the real
+parser, resolver, text planner, and Wasm emitter. This proves compiler
+consistency, not that the record's claimed Project facts are authentic, and
+does not grant publication authority. Only the opaque build prepared by a
 retained authenticated Project snapshot carries the trusted context required
 before materialization. The opt-in Project daemon can return the same bounded
 carrier inline without accepting a path or gaining filesystem, process,
@@ -46,6 +48,8 @@ v2 `web` and `npm` requests to the same pathless text carrier. The legacy
 `ProjectSnapshot::build_web_inline` return type remains Project-v1 scalar-only;
 v2 library callers use `build_npm_inline` rather than confusing the two carrier
 schemas.
+
+## Filesystem publication
 
 The shared Unix npm publisher writes create-new artifacts relative to held
 directories. Before reporting success it also reopens the requested parent's
@@ -66,6 +70,8 @@ carrier, descriptor, or Windows route. Real-carrier Unix regression cases in
 cases in `hook_tests.rs` are part of the hosted-green v0.4.0 regression corpus.
 The hooks exist only in Unix test builds and do not add production concurrency
 authority.
+
+## Evidence and limits
 
 Historical local evidence built the real config-validator fixture, preserved
 exports by stable ID across a display rename, performed offline `npm pack`,

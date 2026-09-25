@@ -6,11 +6,10 @@ Status: implemented bounded projection; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Target execution and broad
 unsafe-program admission are not implied.
 
-The existing `image/facet` interface and `ProjectSemanticImage::expand_facet`
-accept two additional names, `data-access` and `unsafe-boundaries`. Function
-summaries append the corresponding digest-bound handles after the existing
-seven entries. Previous facet payloads and handle/cursor formulas are unchanged;
-summary and method-catalog choice arrays gain the new entries. Image v1 bytes,
+`image/facet` and `ProjectSemanticImage::expand_facet` now accept `data-access`
+and `unsafe-boundaries`. Function summaries append their digest-bound handles
+after the original seven. Earlier facet payloads and handle/cursor formulas
+stay the same; the summary and method catalog add the two choices. Image v1,
 source, Graph, cleanup plans, and ownership semantics are unchanged.
 
 Every new item uses schema `semaprax.image-hir-relationship.v1` and binds image,

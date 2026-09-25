@@ -5,11 +5,11 @@ See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 
 Audience: embedding hosts, agent clients and protocol contributors.
 
-`workspace/read-batch` exposes the existing [immutable read engine](IMAGE-PARALLEL-CANDIDATE-READS-V1.md)
-to NDJSON and MCP clients only when the host explicitly selects it at startup.
-The surrounding stream still processes one outer request at a time. This is
-bounded parallel work within a request, not concurrent independent streams,
-background scheduling or JSON-RPC array batching.
+When the host selects it at startup, `workspace/read-batch` exposes the
+[immutable read engine](IMAGE-PARALLEL-CANDIDATE-READS-V1.md) to NDJSON and MCP
+clients. The stream still handles one outer request at a time. Parallelism is
+bounded within that request; there are no concurrent independent streams,
+background tasks, or JSON-RPC array batches.
 
 ## Host selection
 

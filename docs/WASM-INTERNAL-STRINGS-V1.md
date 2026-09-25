@@ -10,12 +10,11 @@ broader product completion remain separately gated.
 
 ## Purpose and unchanged boundaries
 
-This profile supplies compiler-directed String ownership settlement for a
-selected, bounded standalone Wasm call closure. Ordinary Wasm's value-only
-String imports do not establish physical settlement. A host that clears its
-entire table on return would also leave loop and nested-call lifetimes unproven.
-The new profile therefore lowers ownership at expression, scope and call exits,
-including language failures and recognized runtime-capacity refusals.
+This profile settles String ownership in a bounded standalone Wasm call
+closure. Ordinary Wasm's value-only String imports cannot prove physical
+settlement; clearing a host table on return cannot prove loop or nested-call
+lifetimes. The compiler therefore lowers ownership at expression, scope, and
+call exits, including failures and recognized runtime-capacity refusals.
 
 It is additive: ordinary Wasm, Target Evidence, Project manifests v1-v10,
 existing npm/Rust packages, descriptors, imports and emitted bytes remain on

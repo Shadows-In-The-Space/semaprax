@@ -4,16 +4,12 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: language users, tool authors, and compiler contributors.
 
-`semaprax interpret <file.spx> --function <name|stable-id>
-[--arg <scalar literal>]... [--max-bytes N]` is a deterministic, read-only
-reference evaluator that runs ONE explicitly selected explicit-ID monomorphic
-effect-free scalar function directly from the resolved HIR of one verified
-single-file SEMAPRAX module — no backend toolchain, no code generation, no
-compilation, and no target execution. It is the first executable slice of the
-completion-matrix row "Fast development lane" under Compiler and output
-targets. It contains no JIT, AOT, or Cranelift machinery, no incremental
-build persistence, no hot reload, no debugger mapping, executes nothing on a
-target, and changes no source.
+`semaprax interpret` runs one selected function from a verified single-file
+module. It reads checked HIR and needs no native or Wasm toolchain. The
+function must have an explicit ID, be monomorphic and effect-free, and use the
+admitted scalar boundary. This is a deterministic, read-only development aid,
+not target execution, a debugger, JIT/AOT compilation, hot reload, or source
+mutation. The [completion matrix](COMPLETION-MATRIX.md) owns its product status.
 
 ## Command
 

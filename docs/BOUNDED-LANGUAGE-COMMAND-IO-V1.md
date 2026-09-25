@@ -25,10 +25,9 @@ WASI import, libc read, or ambient JavaScript process access implements these
 operations.
 
 The public command profile selects one explicit stable-ID function with exact
-signature `() -> bool`. `true` and `false` are both successful semantic
-results. They seal the staged stdout and stderr transcripts; normalized
-operation failure, contract failure, target invariant failure, or cleanup
-failure discards both.
+signature `() -> bool`. Both `true` and `false` count as semantic success and
+seal the staged stdout and stderr transcripts. Normalized operation failure,
+contract failure, target invariant failure, or cleanup failure discards both.
 
 ## Invocation input
 
@@ -40,18 +39,17 @@ An adapter snapshots the complete input before semantic execution:
 - the checked cumulative argument-plus-stdin size is at most 65,536 bytes;
 - the snapshot is immutable until invocation settlement.
 
-That capacity is one invocation budget, not one allowance per source or per
-read. The snapshot admits exactly one CommandArguments source and one Stdin
-source and rejects a duplicate of either source; HIR
-admission rejects more than one reachable `stdin_read`, including loop and
-call-cycle reachability. Consequently neither repeated argument lookup nor a
+Capacity is shared by the whole invocation, not renewed per source or read.
+The snapshot accepts exactly one CommandArguments source and one Stdin source;
+duplicates are rejected. HIR admission rejects more than one reachable
+`stdin_read`, including reachability through loops and call cycles. Consequently neither repeated argument lookup nor a
 second representation of the same provider bytes can recharge the budget.
 
-Failure to construct this snapshot is an adapter failure before the language
-entry runs. Native Unix validates and copies raw argument bytes. Native
-Windows converts `wmain` UTF-16 strictly. Node rejects lone surrogates and NUL
-before UTF-8 encoding. Browser consumers inject ordinary immutable snapshots;
-they receive no process authority.
+If snapshot construction fails, the adapter fails before the language entry
+runs. Native Unix validates and copies raw argument bytes; native Windows
+strictly converts `wmain` UTF-16. Node rejects lone surrogates and NUL before
+UTF-8 encoding. Browser consumers supply immutable snapshots without receiving
+process authority.
 
 All `arg_utf8` results borrow one invocation-owned argument arena. Repeated or
 dynamic reads do not mint or recharge roots. The view can be forwarded and

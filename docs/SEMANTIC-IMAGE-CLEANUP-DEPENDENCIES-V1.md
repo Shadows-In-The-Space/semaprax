@@ -5,11 +5,10 @@ Status: implemented bounded image and transport projection; **HOSTED GREEN** und
 
 Audience: compiler contributors, agent authors and embedding hosts.
 
-This query connects source type, case and field identities to actual retained
-cleanup and loan facts. It answers which compiler plan facts depend on a
-selected member without making an agent inspect every function's complete
-plans. Canonical `.spx` source remains authoritative; the query introduces no
-language, runtime, backend or publication authority.
+Use this query to find which retained cleanup and loan facts depend on a
+selected source type, case, or field. It avoids reading every function plan.
+Canonical `.spx` remains authoritative; this read-only view adds no language,
+runtime, backend, or publication authority.
 
 ## Image API and source binding
 

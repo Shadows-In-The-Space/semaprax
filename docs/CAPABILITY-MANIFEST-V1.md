@@ -4,14 +4,10 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax capability-manifest <file.spx>` is a deterministic, read-only
-projection that declares the EXACT build capabilities one verified module
-requires. It is the first executable slice of the completion-matrix row
-"Sandboxed builds and dependencies": before any sandbox can be enforced,
-builds need a machine-checkable statement of what to enforce against. The
-command imports no package, resolves no dependency, writes no lockfile,
-contacts no registry, enforces nothing at build time, executes nothing, and
-changes no source.
+`semaprax capability-manifest <file.spx>` deterministically declares the exact
+build capabilities a verified module requires. It is read-only: no packages,
+dependencies, lockfiles, registry contact, enforcement, execution, or source
+change.
 
 ## Command
 

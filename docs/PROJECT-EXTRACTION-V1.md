@@ -8,10 +8,10 @@ broader product completion remain separately gated.
 
 Audience: compiler maintainers and agents using immutable Project candidates.
 
-This operation moves one authenticated authored body expression into a new,
-explicitly identified, monomorphic function in the same source module. Canonical
-`.spx` remains authoritative. It does not accept source fragments, caller-chosen
-spans, captures, types, effects, or an editable graph.
+This operation extracts one authenticated authored body expression into a new,
+explicitly identified, monomorphic function in the same module. Canonical
+`.spx` remains authoritative. Callers cannot supply source fragments, spans,
+captures, types, effects, or an editable graph.
 
 ## Request and identity
 
@@ -37,8 +37,8 @@ module's callable or declaration bindings. No public manifest export is added.
 The compiler joins the selected checked HIR expression to a unique authored AST
 origin using the retained source revision, digest, module, function, complete
 span, and compatible expression kind. Contract regions, synthetic expressions,
-ambiguous origins, and stale selectors are rejected. The structural path used
-for rebuilding is compiler-derived and never a request field.
+ambiguous origins, and stale selectors are rejected. The compiler derives the structural path used for rebuilding; callers cannot
+supply it as a request field.
 
 ## Captures and evaluation
 

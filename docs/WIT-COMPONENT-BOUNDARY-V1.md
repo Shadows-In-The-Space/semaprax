@@ -12,9 +12,9 @@ Component Model backend.
 2. canonical mapping JSON for `result<s64, status>`;
 3. a strict JavaScript result/status adapter.
 
-The bundle has a frozen SHA-256 known answer and an exact verifier. Tests reject
-every single-byte mutation, every truncation, trailing bytes, and magic/version
-confusion. Node executes both result branches and rejects hostile tags, scalar
+The bundle has a frozen SHA-256 known answer and exact verifier. Tests reject
+single-byte mutations, truncation, trailing bytes, and magic/version confusion.
+Node executes both result branches and rejects hostile tags, scalar
 types, status shapes, zero/overflow codes, empty/NUL/oversized UTF-8 domains,
 invalid class/retryability values, accessors, symbol keys, and failing proxy
 traps. Each property is snapshotted from one own data descriptor and never read

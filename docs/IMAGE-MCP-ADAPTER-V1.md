@@ -5,18 +5,18 @@ See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 
 Audience: MCP clients, embedding hosts and compiler contributors.
 
-The optional stdio adapter exposes the existing v5 semantic workspace through
-Model Context Protocol tools. It pins MCP `2025-11-25`; it does not claim support
-for later revisions or every optional MCP facility. Canonical `.spx` source,
-typed intentions, immutable candidates and separate publication authority remain
-owned by the [v5 workspace protocol](IMAGE-WORKSPACE-PROTOCOL-V5.md).
+The optional stdio adapter exposes the v5 semantic workspace as Model Context
+Protocol tools. It supports the pinned MCP `2025-11-25` revision, not later
+revisions or every optional MCP feature. The [v5 workspace protocol](IMAGE-WORKSPACE-PROTOCOL-V5.md)
+still owns canonical `.spx` source, typed intentions, immutable candidates, and
+separate publication authority.
 
 The external protocol references are the pinned
 [lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle),
 [tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools) and
 [stdio transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-specifications. This document owns Semaprax's adapter bounds and authority model,
-not the upstream protocol.
+specifications. This document specifies Semaprax's bounds and authority model;
+the linked specifications define MCP itself.
 
 The optional [saved-source VS Code adapter](VSCODE-SAVED-SOURCE-ADAPTER-V1.md)
 uses this transport for an explicit candidate and read-only diff workflow. It

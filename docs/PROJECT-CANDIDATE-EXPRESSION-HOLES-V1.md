@@ -14,9 +14,9 @@ selection. The function stable ID, actual revision-scoped HIR expression ID and
 exact draft digest select meaning. Source spans and AST paths are not request
 inputs. The existing expression catalogue supplies eligible selections.
 
-[Draft expression discovery](PROJECT-DRAFT-EXPRESSION-CATALOG-V1.md) supplies
-current body selections after earlier fills, bound to the exact draft and its
-private last-valid state. It does not release that state as a completed draft.
+After earlier fills, [draft expression discovery](PROJECT-DRAFT-EXPRESSION-CATALOG-V1.md)
+provides current body selections bound to the exact draft and its private
+last-valid state. That state is not released as a completed draft.
 
 The selection must have a unique authenticated canonical AST origin in a
 monomorphic top-level function body, including `main`. Contract regions remain
@@ -26,11 +26,10 @@ Body and expression holes cannot overlap the same function. Multiple disjoint
 expression holes can coexist within one function, alongside body holes in other
 functions. All holes share the existing limit of sixteen and unique hole IDs.
 
-The separate [Contract Expression Holes](PROJECT-CANDIDATE-CONTRACT-HOLES-V1.md)
-route selects existing pre/postcondition subtrees without widening this API.
-Those disjoint regions can coexist with a body hole in the same function and
-share the same sixteen-hole budget. This body-expression route still rejects
-contract selections.
+Use the separate [Contract Expression Holes](PROJECT-CANDIDATE-CONTRACT-HOLES-V1.md)
+route for existing pre/postcondition subtrees. Disjoint contract regions can
+coexist with a body hole in the same function and share its sixteen-hole budget.
+This body-expression API still rejects contract selections.
 
 ## Context and validation
 

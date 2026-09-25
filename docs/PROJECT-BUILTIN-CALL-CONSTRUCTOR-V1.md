@@ -19,18 +19,17 @@ operation without inventing a source function or import:
 }
 ```
 
-The object is closed to these three fields. `target` is a stable operation
-identity, never a source spelling. Arguments use the ordinary recursive typed
-expression grammar, retain request order, and consume its existing node,
-depth, and input budgets. There are no type arguments or implicit conversions.
-The existing `call` constructor retains its local/imported function lookup.
+Only these three fields are accepted. `target` names a stable operation
+identity, not a source spelling. Arguments use the existing recursive typed
+expression grammar, keep request order, and count against its node, depth and
+input budgets. No type arguments or implicit conversions are added. The
+existing `call` constructor still looks up local/imported functions.
 
 ## Compiler ownership and source replay
 
 `src/byte_ops.rs` and `src/string_ops.rs` own the closed operation inventories,
-source spellings, arities, and semantic signatures. This constructor projects
-those inventories; it introduces no new language semantics, evaluator, or
-backend operation.
+source spellings, arities, and semantic signatures. The constructor exposes those inventories without adding language semantics,
+an evaluator, or a backend operation.
 
 | Stable identity | Source operation | Arguments | Result |
 | --- | --- | --- | --- |

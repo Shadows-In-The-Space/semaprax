@@ -1,5 +1,7 @@
 # Public Generic Wasm Component v1
 
+Audience: compiler contributors and Wasm component integrators.
+
 Status: **private local execution profile; not public support**.
 
 This specification defines an additive callable Component Model artifact over
@@ -7,13 +9,14 @@ the existing `public-generic-wasm-provider.v1` subject. It does not change the
 WIT type projection, descriptor, carrier, Project profile, legacy build routes,
 or PG-9 decision.
 
+In plain terms: this produces one private Component Model artifact from an already admitted provider; it does not make the provider public.
+
 ## Admission and derivation
 
-The input is the exact checked `ProjectRevision` and the retained
-`AdmittedPublicGenericEndpointV1` replayed by that revision. The endpoint must
-remain synchronous and effect-free. The existing provider admission rule is
-unchanged: both input and result have exactly two ordered owned-`Bytes` leaves.
-No new source forms or leaf-count allowance are admitted here.
+Input is the checked `ProjectRevision` and its retained
+`AdmittedPublicGenericEndpointV1`. The endpoint stays synchronous and
+effect-free, with exactly two ordered owned-`Bytes` leaves on both sides. This
+admits no new source form or leaf count.
 
 Derivation is deterministic and takes no caller-selected descriptor, endpoint,
 binding, WIT, or toolchain facts. The artifact binds the exact replayed

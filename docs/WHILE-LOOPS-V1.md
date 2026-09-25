@@ -9,9 +9,8 @@ row of [COMPLETION-MATRIX.md](COMPLETION-MATRIX.md) remains Partial.
 
 ## Objective
 
-SEMAPRAX previously expressed iteration only through recursion. This tranche
-adds the smallest end-to-end loop slice that keeps every cleanup, ownership,
-and backend invariant intact:
+Earlier SEMAPRAX expressed iteration through recursion. This tranche adds
+bounded loops without changing cleanup, ownership, or backend rules:
 
 ```text
 while <condition> { <body> }

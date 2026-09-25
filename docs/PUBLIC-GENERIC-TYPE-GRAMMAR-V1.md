@@ -7,23 +7,20 @@ It is not selected by any public descriptor, carrier, package, or consumer, and
 public generic ownership remains unsupported and unpublished. A term of this
 grammar is not a public ABI.
 
+In plain terms: it turns already checked generic types into a stable description; it does not accept new source code or publish an ABI.
+
 Audience: ABI, package, evidence, and generated-consumer maintainers.
 
 ## Scope
 
-`public_generic_type` projects one already-checked `ResolvedType` into a
-versioned, target-neutral term plus the explicit template and ordered argument
-identities derived from it. It is read-only: it admits no syntax, compiles
-nothing, executes nothing, creates no file, and grants no authority. Nothing is
-read back from a previously emitted artifact; every fact is re-derived from the
-checked declarations.
+`public_generic_type` turns one checked `ResolvedType` into a versioned,
+target-neutral term with its template and ordered arguments. It is read-only:
+it adds no syntax, execution, files, or authority, and re-derives every fact
+from checked declarations rather than emitted artifacts.
 
-A projection resolves nominals against a *type inventory* rather than against a
-whole program, so the same grammar describes a single-file module and the
-retained type facts of an immutable Project candidate without a second
-implementation. Building an inventory is also where ambiguity is detected: a
-repeated declaration identity is recorded on insert, and every later lookup of
-it fails closed rather than silently taking the first.
+Nominals resolve through a *type inventory*, allowing the same grammar to cover
+a module and an immutable Project candidate. Repeated declaration identities
+make every later lookup fail closed instead of choosing an arbitrary first one.
 
 | Layer | Identifier |
 | --- | --- |

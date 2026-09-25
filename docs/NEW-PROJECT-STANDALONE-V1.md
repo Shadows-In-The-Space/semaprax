@@ -10,13 +10,11 @@ Audience: new SEMAPRAX users, toolchain contributors, and reviewers.
 
 ## Purpose
 
-`semaprax new <destination>` used to exist only in the unpublished full
-toolchain, because its publication went through a held-parent staged authority
-that lives in a private platform crate. A developer or agent who installed the
-published compiler had to install a second binary from a source checkout to
-create a first project. This version gives the standalone compiler its own
-`new`, with the same grammar, templates, file bytes, and success line, through
-a bounded route the compiler library can implement with the standard library.
+Previously, `semaprax new <destination>` required the unpublished full
+toolchain and its private held-parent staging authority. Users of the
+standalone compiler needed a second binary to create a first project. The
+standalone compiler now offers `new` through a bounded standard-library route,
+with the same grammar, templates, file bytes, and success line.
 
 ## Grammar and template
 

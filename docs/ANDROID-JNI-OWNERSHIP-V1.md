@@ -8,17 +8,12 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
-This document freezes the first bounded Kotlin/JNI projection of SEMAPRAX
-ownership. It connects three exact generated callable-v3 providers to the
-unpublished native host and authenticated receipt ledger: the success-direction
-`token.discard-two` fixture, one canonical semantic-failure witness built by
-`emit_private_native_callable_v3_android_corpus_fixture` from the
-owned-resource corpus `requires-false` case over `token.requires`, and one
-canonical owned-result witness built by the same emitter from the corpus
-`identity-max` case over `token.identity`. All are private fixtures for the
-ownership boundary described by
-[RFC 0003](RFC-0003-CLEANUP-AND-RESOURCE-ABI.md), not a public resource ABI and
-not permission to open `SPX-B104`.
+This freezes a bounded Kotlin/JNI ownership projection. It connects three exact
+callable-v3 fixtures to the unpublished host and authenticated receipt ledger:
+success `token.discard-two`, failure `token.requires`/`requires-false`, and
+owned result `token.identity`/`identity-max`. They are private
+[RFC 0003](RFC-0003-CLEANUP-AND-RESOURCE-ABI.md) fixtures, not a public ABI or
+permission to open `SPX-B104`.
 
 ## Scope
 

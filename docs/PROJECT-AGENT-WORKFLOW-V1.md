@@ -21,8 +21,8 @@ and [Windows](https://github.com/wavect/semaprax/actions/runs/33608662244/job/10
 ## Scope
 
 `semapraxd --stdio --allow-project-workflow` binds one Project Manifest v1 at
-startup and reports `semaprax.agent-transport.v4`. It preserves the v2 and v3
-profiles and completes one bounded calculator maintenance workflow:
+startup and reports `semaprax.agent-transport.v4`. The v2 and v3 profiles stay unchanged. V4 completes one bounded calculator
+maintenance workflow:
 
 1. inspect the authenticated Project through snapshot, check, graph, context,
    and test;
@@ -34,9 +34,9 @@ profiles and completes one bounded calculator maintenance workflow:
    candidate Project;
 5. rebuild the refreshed Project as one deterministic inline Web carrier.
 
-This is not a generic patch/change/build daemon. The request cannot select a
-root, source path, source or patch bytes, evidence, output destination, tool,
-environment, process, or native/Rust target.
+The daemon supports this workflow, not arbitrary patch/change/build requests.
+Requests cannot select a root, source path, source or patch bytes, evidence,
+output destination, tool, environment, process, or native/Rust target.
 
 ## Profiles and compatibility
 

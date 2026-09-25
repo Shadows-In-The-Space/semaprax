@@ -4,11 +4,10 @@ Status: versioned additive contract; implementation and executable completion
 evidence are owned by the #214 batch and the completion matrix.
 Audience: compiler contributors and project assurance integrators.
 
-Project Assurance Manifest v1 is the project-level companion to [Assurance
-Manifest v1](ASSURANCE-MANIFEST-V1.md). It authenticates one retained Project
-snapshot and reports obligations across the project's declared sources. It is
-read-only evidence: it grants no execution, publication, signing, review, or
-other authority.
+Project Assurance Manifest v1 extends [Assurance Manifest v1](ASSURANCE-MANIFEST-V1.md)
+to a project. It authenticates one retained Project snapshot and reports
+obligations across all declared sources. This read-only evidence grants no
+execution, publication, signing, review, or other authority.
 
 ## Envelope and subject
 
@@ -21,9 +20,8 @@ has exactly the following top-level shape:
 
 `payload_digest` binds the canonical `payload` bytes with SHA-256 over domain
 `semaprax.project-assurance-manifest.payload.v1\0`, the byte length as a
-little-endian u64, and those exact bytes. It is an integrity digest, not a
-signature or source authority. Both the payload
-and envelope use recursively sorted JSON and one trailing newline. Unknown
+little-endian u64, and those exact bytes. The digest checks integrity; it is not a signature or source authority. Both
+the payload and envelope use recursively sorted JSON and one trailing newline. Unknown
 fields, duplicate keys, non-canonical JSON, digest mismatch, and output that
 would exceed the selected byte bound are refused. The producer never
 truncates or repairs output.

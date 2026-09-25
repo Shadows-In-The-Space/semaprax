@@ -16,10 +16,9 @@ The recursive candidate expression grammar adds two closed literal forms:
 ```
 
 `string` carries decoded Unicode text, including empty strings, NUL, other
-control characters, quotes and backslashes. The value is literal content,
-never a source fragment, identifier, escape-language input or interpolation.
-The existing canonical source formatter escapes it, and ordinary source
-reparsing must recover exactly the same contents without Unicode normalization.
+control characters, quotes and backslashes. The value is literal content, not a source fragment, identifier, escape-language
+input or interpolation. The canonical source formatter escapes it. Reparsing
+must recover the exact contents without Unicode normalization.
 It constructs the existing owned `string` expression, not a borrowed `str`,
 an implicit byte conversion, or a new string operation.
 
@@ -30,9 +29,8 @@ The existing source array literal determines the exact Copy type `[u8; N]`.
 Canonical source renders each element with its ordinary `u8` suffix.
 
 Both forms compose with the existing expression constructors in function
-bodies, selected expressions, declarations and typed hole fills. Structural
-availability does not make either form valid at an arbitrary selected type,
-contract, effect budget or target profile. Complete candidate formatting,
+bodies, selected expressions, declarations and typed hole fills. Having a constructor does not make its expression valid for every selected
+type, contract, effect budget or target profile. Complete candidate formatting,
 reparsing and independent Project admission remain mandatory. Selected
 expression replacement must additionally preserve the original resolved type
 and ownership; changing an array's length changes its type.

@@ -11,10 +11,9 @@ an immutable Project candidate before publication.
 
 The image-level [Analysis Coverage v1](SEMANTIC-IMAGE-ANALYSIS-COVERAGE-V1.md)
 describes retained source facts and the boundaries it does not inspect. This
-candidate projection applies that same collector to the exact fully admitted
-final revision of one `ProjectCandidate`. It lets review observe a proposed
-source and inventory change without treating the current base image as evidence
-about candidate source.
+candidate report uses the same collector on the exact, fully admitted final
+revision of one `ProjectCandidate`. Reviewers see the proposed source and
+inventory, rather than using the current base image as evidence about them.
 
 This is a final-candidate inventory, not a before/after coverage delta. A source
 change cannot turn an uninspected deployment, generator, provider, runtime or
@@ -73,8 +72,8 @@ The wrapper adds:
 per-source bindings describe the final candidate revision. Candidate operations
 preserve manifest source membership and rebuild a complete admitted Project
 revision; this report does not claim manifest mutation or discover unlisted
-files. Agents needing a comparison must retain a separately bound base image
-report and compare the two as descriptive inventories.
+files. For a comparison, retain a separately bound base image report and compare
+the two descriptive inventories.
 
 The fixed eight `areas` rows keep the image contract unchanged:
 

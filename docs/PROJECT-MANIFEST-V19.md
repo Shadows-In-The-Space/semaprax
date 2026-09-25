@@ -5,14 +5,16 @@ Status: **implemented with local conformance.** Project v19 admits the private
 
 Audience: compiler, project-tooling, and standard-library contributors.
 
-Project v19 selects the private `filesystem-io.v3` profile. It adds checked
-atomic publication while preserving the frozen Project v18 and filesystem I/O
-v2 authority and wire contracts. The operation and provider semantics are owned
-by [Host Operation Outcome v1](HOST-OPERATION-OUTCOME-V1.md).
+Project v19 selects the private `filesystem-io.v3` profile. Its checked atomic
+write reports whether publication succeeded, failed before commit, or has an
+uncertain outcome. Project v18 and filesystem I/O v2 authority and wire
+contracts remain unchanged. See
+[Host Operation Outcome v1](HOST-OPERATION-OUTCOME-V1.md) for operation and
+provider semantics.
 
 ## Manifest
 
-The standard-library package uses this canonical v19 projection:
+The standard-library package selects v19 through this canonical table manifest:
 
 ```toml
 schema = "semaprax.manifest.v1"

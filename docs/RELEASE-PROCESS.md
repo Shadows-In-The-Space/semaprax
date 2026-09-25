@@ -1,17 +1,26 @@
 # Release process
 
-Status: bounded tag-release procedure with exact published evidence.
-
-The main sections below record the most recently published tagged milestone.
-Later releases inherit the same release workflow; this archive keeps the detailed
-evidence for that milestone.
+Status: tag-release procedure and historical evidence; v0.6.0 is not published.
 
 Audience: maintainers and release reviewers.
 
-SEMAPRAX tag releases are produced only by the repository CI workflow after
-the exact tag commit passes every job aggregated by `release-gate`. A local
-archive can establish scoped local packaging and product behavior, but is not
-release-promotion evidence.
+Only the repository CI workflow can publish a tag release, and only after the
+exact tag commit passes every job in `release-gate`. A local archive can test
+packaging, but cannot certify a release. This page combines the procedure with
+historical v0.4.x evidence; use [v0.6.0 status](RELEASE-0.6.0-STATUS.md) for
+the current tag.
+
+For a new release:
+
+1. Prepare the approved version across manifests, lockfiles, CLI, and docs;
+   review the generated diff and complete the human release notes.
+2. Verify the exact candidate commit with the required checks. Keep the
+   release commit on `main` and confirm the remote head still matches it.
+3. Create one annotated tag at that commit. Do not move a published tag.
+4. Let the hosted `release-gate` finish. Only a green exact-tag gate can
+   publish immutable archives and signing material.
+5. Verify the published asset set and record its exact hosted evidence. A
+   failed or incomplete tag run is not a release.
 
 ## Tag admission
 
@@ -25,7 +34,9 @@ CLI's agreement with it; they do not independently authenticate the checkout
 against Git HEAD or the tag. Exact-checkout provenance remains the release
 workflow's responsibility, not a consequence of this self-consistency check.
 
-The admitted release hosts and target archives are:
+The v0.4.0 release used these hosts and archives. Replace the version in the
+filename for a later release; do not treat the table as evidence for that later
+tag.
 
 | Hosted runner | Exercised target | Archive |
 | --- | --- | --- |
@@ -50,17 +61,19 @@ before the archive can be uploaded.
 
 ## Pre-tag release checklist
 
-A package-version release is a repository-wide consistency change, not only a
-root-manifest edit. Before committing the release, update and verify all of the
-following surfaces together:
+A release version must agree across the workspace, lockfiles, CLI, docs, and
+packaging. Before committing, update these surfaces together.
 
 The mechanical portion is automated and intentionally excludes historical
 evidence, frozen protocol identities, the human-written release record, and
 release-note curation:
 
+Set `RELEASE_VERSION` and `RELEASE_DATE` to the approved version and UTC date
+before running either command.
+
 ```sh
-python3 scripts/prepare-release.py --write --version 0.4.0 --date 2026-09-06
-python3 scripts/prepare-release.py --check --version 0.4.0
+python3 scripts/prepare-release.py --write --version "$RELEASE_VERSION" --date "$RELEASE_DATE"
+python3 scripts/prepare-release.py --check --version "$RELEASE_VERSION"
 ```
 
 The write mode requires a clean worktree, updates the declared current-version
@@ -455,7 +468,11 @@ manifest, provenance, or publication. Only after this archive-attestation gate
 does the workflow write `dist/SHA256SUMS`, run `scripts/release-manifest.py`,
 run `scripts/release-provenance.py`, and keylessly `cosign sign-blob` the final
 provenance. It then derives and byte-replays `release-signature-claim.json`
-from the exact provenance/bundle pair. The workflow uploads
+from the exact provenance/bundle pair. It publishes only after streaming the
+exact Linux CLI member from its already-attested
+archive and independently running `doctor verify-release` over the final
+directory against the frozen trusted-root digest; a certificate/identity
+disagreement fails before `gh release create`. The workflow uploads
 `release-manifest.json`, `release-provenance.json`, the Sigstore
 `release-provenance.bundle`, its deterministic
 `release-signature-claim.json`, and the explicit `trusted_root.jsonl` snapshot

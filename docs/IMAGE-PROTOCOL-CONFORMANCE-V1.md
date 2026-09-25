@@ -5,11 +5,11 @@ Status: implemented bounded static-conformance query; **HOSTED GREEN** under the
 dispatch, behavioral proof, target execution or publication support.
 Audience: compiler contributors and semantic agent client authors.
 
-`ProjectSemanticImage::protocol_conformance` exposes canonical, source-backed
-static protocol declarations and implementation bindings over one exact
-admitted Project revision. `.spx` remains authoritative. This additive report
-does not change Image v1 or the runtime Graph schema, whose declaration index
-does not contain protocol or implementation nodes.
+`ProjectSemanticImage::protocol_conformance` reports source-backed static
+protocol declarations and implementation bindings for one admitted Project
+revision. `.spx` remains authoritative. The report does not change Image v1 or
+the runtime Graph schema; that schema's declaration index has no protocol or
+implementation nodes.
 
 Each participating module binds its path, source digest and source revision to
 the image digest, Project revision and existing semantic graph digest. The

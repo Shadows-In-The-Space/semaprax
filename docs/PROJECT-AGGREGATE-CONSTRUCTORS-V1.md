@@ -21,16 +21,16 @@ shapes, each with an optional `type_arguments` array:
 {"kind":"variant","target":"payments.status.ready","fields":[{"target":"payments.status.ready.value","value":{"kind":"i64","value":7}}]}
 ```
 
-Record targets identify an explicitly identified source record. Variant targets
-identify an explicit case belonging to an explicitly identified source variant.
-Each field target identifies a member of that exact record or case. The compiler
-derives all source names from authenticated declarations and the destination
-module's existing local or imported type binding. Requests cannot supply source
-declaration spellings, aliases, paths, spans, HIR, graph facts, or a new import.
+A record target selects an explicitly identified source record. A variant
+target selects an explicit case of an explicitly identified source variant.
+Field targets select members of that exact record or case. The compiler derives
+names from authenticated declarations and the destination module's existing
+local or imported type binding. Requests cannot supply declaration spellings,
+aliases, paths, spans, HIR, graph facts, or new imports.
 
 Every field must occur exactly once. Missing, repeated, foreign, and unknown
-field identities reject. The input array remains initializer evaluation order;
-the compiler must not sort expressions into declaration order. Each value uses
+field identities reject. The input array defines initializer evaluation order. The compiler must not
+sort its expressions into declaration order. Each value uses
 the same recursive expression vocabulary and shared depth/node accounting.
 Empty records and unit cases use an empty field array.
 

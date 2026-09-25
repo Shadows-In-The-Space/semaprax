@@ -6,18 +6,16 @@ Audience: agent and tool authors, plus compiler contributors working on
 contract verification, the Assurance Manifest v1 obligation join (#129,
 #183), and the later model-checking (#185) and proof-kernel (#186) backends.
 
-Bounded SMT Discharge v1 (`src/assurance_manifest/smt_discharge/`) is the
-first real static proof backend for a deliberately small, closed, pure
-subset of SEMAPRAX contracts: integer/boolean arithmetic without division,
-comparisons, `and`/`or`/`not`, `if`, and immutable `let`, over
-`{i64, i32, u8, usize, bool}`. It translates one function's `requires`,
-`ensures`, and body into a `QF_LIA` SMT-LIB2 query, runs it through an
-explicitly provisioned solver under bounded time and output, validates any
-`sat` model by independently replaying it against checked-arithmetic
-semantics, and classifies the result as proved, a validated concrete
-counterexample, or one of several distinct non-result outcomes. It is proof
-data, not permission: it never runs a target, discovers or runs project
-tests, writes source, or removes a runtime guard.
+Bounded SMT Discharge v1 (`src/assurance_manifest/smt_discharge/`) is the first
+static proof backend for a small, closed, pure contract subset: integer/boolean
+arithmetic without division, comparisons, `and`/`or`/`not`, `if`, and immutable
+`let`, over
+`{i64, i32, u8, usize, bool}`. It turns one function's `requires`, `ensures`,
+and body into `QF_LIA` SMT-LIB2, uses an explicitly provisioned solver with
+time and output bounds, and independently replays any `sat` model against
+checked arithmetic. The result is proved, a validated counterexample, or a
+distinct non-result. This is proof data, not authority to run a target or
+tests, write source, or remove a runtime guard.
 
 ## Why this exists
 

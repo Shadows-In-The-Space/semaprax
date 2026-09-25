@@ -16,14 +16,14 @@ diffs, requests fixed-policy interpreter tests, then prepares and applies a
 separately approved managed Workspace publication. It also rejects a competing
 signature and repeated publication against the stale managed base.
 
-Candidate admission owns identity and manifest preservation, complete source
-rebuilding, contract/ownership checks and native-C11/structural-Wasm projection.
-Those checks are not runtime target conformance or external ABI compatibility.
-The test requests interpreter execution when the evidence runner executes it.
-Target programs remain outside this managed-generation scenario.
+Candidate admission checks identity and manifest preservation, rebuilds all
+source, checks contracts and ownership, and produces native-C11/structural-Wasm
+projections. Those checks do not prove runtime target conformance or external
+ABI compatibility. The test requests interpreter execution when the evidence
+runner runs it; target programs remain outside this managed-generation scenario.
 
 Publication changes only the authenticated immutable managed generation through
-`ACTIVE`. The scenario asserts original `.spx` files remain unchanged. This is
+`ACTIVE`. The scenario checks that original `.spx` files stay unchanged. This is
 therefore an integrated bounded precursor to the requested twelve-step scenario,
 not its canonical Git-source commit or completion evidence. Full source commit,
 general signature evolution, hostile race coverage, native/Wasm execution and

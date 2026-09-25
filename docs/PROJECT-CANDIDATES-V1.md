@@ -11,10 +11,10 @@ Audience: agent builders, compiler contributors, and reviewers.
 `project::ProjectCandidate` retains an immutable base `Arc<ProjectRevision>`
 and a separately admitted candidate revision. `open(base, expected_revision)`
 creates the initial candidate. `apply(expected_candidate_digest, change)`
-returns a new candidate, leaving the previous candidate, siblings, and source
-files unchanged. Dropping a candidate discards the overlay. There are no
-filesystem handles, cache locations, source locks, publication methods, or
-automatic execution in this API.
+returns a new candidate without changing the previous candidate, its siblings,
+or source files. Dropping it discards the overlay. This API has no filesystem
+handles, cache locations, source locks, publication methods, or automatic
+execution.
 
 [Source Review v1](PROJECT-CANDIDATE-SOURCE-REVIEW-V1.md) exposes a closed report
 of exact base/candidate source pairs and ordinary diffs after independent
@@ -23,9 +23,8 @@ existing heterogeneous candidate report and digest unchanged.
 
 Every change names the exact current Project revision. Every application also
 requires the exact candidate digest, which binds the complete intention
-history and evidence. Two histories that reach the same source revision need
-not have the same candidate digest. A stale selector rejects before source
-transformation.
+history and evidence. Different histories can reach the same source revision yet have different
+candidate digests. Stale selectors are rejected before source transformation.
 
 ## Closed Semantic Change IR
 

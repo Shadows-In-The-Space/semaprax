@@ -8,10 +8,10 @@ separately gated.
 
 Audience: agent builders, editor integrators and compiler contributors.
 
-An unfinished draft can discover expression selections from its current
-last-valid candidate without exposing that candidate as the completed draft.
-This supports planning another hole after a successful fill changes checked
-expression identities or introduces new lexical bindings.
+An unfinished draft can list expressions from its current last-valid candidate
+without releasing that candidate as the completed draft. Use this to plan
+another hole after a successful fill changes expression identities or adds
+lexical bindings.
 
 ## Library and report
 
@@ -27,8 +27,8 @@ binds `draft_revision`, `target` and `region` (`body` or `contract`) and names
 the prior valid facts explicitly as `last_valid_revision` and
 `last_valid_candidate_digest`. It preserves the owning catalogue's source
 provenance, declared effect budget, expression identities, expected types,
-ownership modes, source spans, lexical scopes and limits. Source paths and
-spans are descriptive metadata, never client-supplied mutation coordinates.
+ownership modes, source spans, lexical scopes and limits. Source paths and spans describe the source; clients cannot use them as mutation
+coordinates.
 
 Every report says:
 

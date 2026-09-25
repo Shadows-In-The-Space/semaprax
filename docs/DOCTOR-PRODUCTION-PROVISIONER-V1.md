@@ -10,13 +10,12 @@ Audience: release engineers, platform maintainers, and security reviewers.
 
 ## Purpose and boundary
 
-This contract closes the previously external bootstrap and aggregate-settlement
-boundary around the private offline doctor launcher, worker, and collector.  It
-does not make an ordinary `semaprax doctor --profile` selector authoritative.
-The production entry consumes one dedicated, single-threaded process with a
-closed descriptor inventory, verifies one signed release capsule, creates the
-private namespace context, installs aggregate cgroup limits, launches only held
-images, and releases report bytes only after the complete owned cgroup is empty.
+The production provisioner owns bootstrap and aggregate settlement for the
+private launcher, worker, and collector. It does not make an ordinary `semaprax doctor --profile` selector authoritative. Its dedicated,
+single-threaded process receives a closed descriptor inventory, verifies a
+signed release capsule, creates private namespaces, installs aggregate cgroup
+limits, launches only held images, and releases the report only after the owned
+cgroup is empty.
 
 The first implementation is native 64-bit little-endian Linux x86-64 and
 AArch64. Other hosts reject before interpreting capsule contents or changing

@@ -11,9 +11,8 @@ evidence maintainers.
 
 ## Purpose and closed admission
 
-This contract extends the bounded [Acyclic Nested Owned-Byte Records
-v1](NESTED-OWNED-BYTE-RECORDS-V1.md) profile with immutable top-level record
-reconstruction:
+This adds immutable top-level reconstruction to the bounded
+[Acyclic Nested Owned-Byte Records v1](NESTED-OWNED-BYTE-RECORDS-V1.md) profile:
 
 ```semaprax
 value with { marker: 7, leaf: replacement }

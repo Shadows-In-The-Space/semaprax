@@ -6,11 +6,11 @@ runtime, deployment, or full-product promotion is implied.
 
 Audience: agent authors, embedding hosts, and compiler contributors.
 
-Finding the right symbol does not establish its complete runtime contract.
-`ProjectSemanticImage::analysis_coverage(expected_image)` exposes both retained
-facts and analysis blind spots as a bounded, read-only graph-facing report.
-It uses schema `semaprax.image-analysis-coverage.v1`; canonical `.spx` remains
-authoritative. The query creates no graph-only meaning and grants no authority.
+Use `ProjectSemanticImage::analysis_coverage(expected_image)` to see what a
+selected image proves and what it cannot establish. This bounded, read-only
+`semaprax.image-analysis-coverage.v1` report cannot turn a found symbol into
+a complete runtime contract. Canonical `.spx` remains authoritative; the
+report adds no graph-only meaning or authority.
 
 ## Selection and report
 

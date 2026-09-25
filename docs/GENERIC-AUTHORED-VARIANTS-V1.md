@@ -11,9 +11,9 @@ These are historical local results, not a new run or the current evidence ceilin
 
 Audience: compiler contributors and reviewers.
 
-This additive private profile admits effect-free generic functions over authored
-flat variants such as `Choice<Bytes, T>`, with exactly one owning parameter and
-one explicit type parameter. `T` is instantiated with exactly `i64`, `i32`,
+This private profile admits effect-free generic functions over flat authored
+variants such as `Choice<Bytes, T>`. Each has one owning parameter and one
+explicit type parameter. `T` is instantiated with exactly `i64`, `i32`,
 `u8`, `usize`, `char`, `f32`, `f64`, or `bool`. Every substitution must satisfy
 the existing concrete owned-byte variant profile: one case owns direct `Bytes`
 fields, and all remaining fields are Copy scalars. The compiler-owned `Option`

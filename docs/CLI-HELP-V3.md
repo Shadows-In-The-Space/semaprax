@@ -8,9 +8,8 @@ broader product completion remain separately gated.
 
 Audience: CLI users, release engineers, and compiler contributors.
 
-This additive revision gives a user whose known command invocation is rejected
-a direct route to that command's scoped usage. It preserves the v1 catalog and
-help bytes and the v2 typo behavior.
+When a known command rejects an invocation, v3 points the user directly to its
+scoped usage. The v1 catalog and help bytes and v2 typo behavior stay unchanged.
 
 ## Recovery hint
 
@@ -21,17 +20,15 @@ appends this exact stderr line after the command's diagnostic:
 hint: run `semaprax check --help` for usage
 ```
 
-The entered command name or alias is reproduced exactly. The hint is omitted
-for successful commands, compiler or execution failures with status 1, empty
-invocations, unknown commands, commands hidden by the executable's capability
-boundary, the `help` command, and invocations containing `--help` or `-h` in a
-malformed position. Those exclusions preserve existing exact output and avoid
-revealing private commands.
+The hint repeats the entered command name or alias exactly. It is not shown
+for success, status-1 compiler or execution failures, empty invocations,
+unknown or capability-hidden commands, `help`, or invocations with misplaced
+`--help` or `-h`. These exclusions preserve existing exact output and prevent
+private commands from being revealed.
 
-The hint is derived only from the executable's static capability-visible help
-catalog and the final exit status. It performs no source, filesystem,
-environment, target, plugin, process, or network inspection and grants no
-command authority.
+Only the executable's static capability-visible catalog and final exit status
+determine the hint. It inspects no source, filesystem, environment, target,
+plugin, process, or network state and grants no command authority.
 
 ## Preservation and evidence
 

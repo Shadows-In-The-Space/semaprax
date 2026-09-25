@@ -7,7 +7,7 @@ Audience: C++ integration authors, compiler contributors, and reviewers.
 
 ## Purpose and compatibility
 
-`semaprax cxx-package <file.spx> --function <name-or-id>` emits one canonical
+`semaprax cxx-package <file.spx> --function <name-or-id>` emits a canonical
 JSON envelope containing a C++17 header and a C11 provider translation unit.
 The provider embeds the production native projection and adds externally
 linked wrappers around the selected internal functions. This closes the
@@ -36,11 +36,10 @@ is an out pointer. The wrapper:
 5. returns semantic failure for a non-success SEMAPRAX status; and
 6. returns success only after the native final result commit.
 
-The selected profile has no imports, effects, owned values, cleanup actions,
-callbacks, exceptions, allocator exchange, or reusable context. One status
-entry is therefore the complete per-invocation failure capacity, not a general
-runtime policy. C++ exceptions never cross the C boundary and the generated C
-provider does not call C++.
+The selected profile has no imports, effects, owned values, cleanup, callbacks,
+exceptions, allocator exchange, or reusable context. Its one status entry is a
+per-call failure bound, not a general runtime policy. C++ exceptions never cross
+the C boundary, and generated C never calls C++.
 
 ## Canonical envelope
 
@@ -58,8 +57,8 @@ contains:
 - `provider_c`, its byte length, and domain-separated digest; and
 - fixed nonclaims.
 
-`verify_package_envelope` requires the caller's expected source path and exact
-selection; embedded source is proof data and cannot select its own subject.
+`verify_package_envelope` requires caller-supplied source path and exact
+selection; embedded source is proof data and cannot choose its own subject.
 The verifier first derives the expected package from that retained subject,
 then checks closed keys, canonical byte counts and all three digest layers and
 parses and verifies the embedded source through the

@@ -1,5 +1,7 @@
 # Package Registry Snapshot v1
 
+Audience: package-tool authors and compiler contributors working on issue #195.
+
 The additive [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md) binds a
 closed [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) to every
 publication while preserving this v1 schema, wire, decoder, digest domain, and
@@ -11,12 +13,9 @@ their focused tests; additive v2 evidence has separate focused tests. The CLI
 front has its own focused tests. None is hosted or a publication/support
 decision.
 
-Audience: package-tool authors and compiler contributors working on
-issue #195.
-
 `crate::package_registry` is an authority-free, content-addressed model of a
-published-package registry: a deterministic, immutable snapshot of package
-coordinates that composes with the existing
+published-package registry: one deterministic immutable coordinate snapshot
+that composes with the existing
 [Offline Deterministic Package Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md)
 rather than reimplementing dependency solving.
 
@@ -60,10 +59,10 @@ envelope. Each entry binds:
 routine `package_resolver_v2`'s own catalog admission uses, and its embedded
 coordinate is cross-checked against the entry's declared `package`/`version`.
 
-"Publishing" a new version is a pure function from the complete prior entry
-list plus one new entry -- calling `build_snapshot` again -- not a mutation
-of retained state, matching how `package_lock_v3` and `package_resolver_v2`
-already take a complete caller-owned catalog rather than an appended one.
+To "publish" a version in this model, call `build_snapshot` again with the
+complete prior entry list plus the new entry. This pure function does not
+mutate retained state. Like `package_lock_v3` and `package_resolver_v2`, it
+takes a complete caller-owned catalog, not an append operation.
 
 ## Determinism, structurally
 
@@ -113,13 +112,12 @@ runs over the already canonically-keyed `BTreeMap`, not the input slice.
 
 ## Revocation
 
-`PublicationStatus::Yanked` never removes or mutates an entry; it is carried
-in the same canonical, digest-bound bytes as everything else. `YankPolicy`
-gives three closed choices when projecting a snapshot into a resolver
-catalog: exclude yanked versions silently (`ExcludeYanked`, the default),
-refuse outright if any are present (`RefuseIfYanked`, `SPX-PKR610`), or
-include them with an explicit `SPX-PKR609` warning diagnostic
-(`AllowYankedWithWarning`) -- never silent inclusion.
+`PublicationStatus::Yanked` is part of the canonical, digest-bound entry bytes;
+it does not remove or mutate an entry. When converting a snapshot into a
+resolver catalog, `YankPolicy` offers exactly three choices: silently exclude
+yanked versions (`ExcludeYanked`, the default), reject any snapshot containing
+them (`RefuseIfYanked`, `SPX-PKR610`), or include them with an explicit
+`SPX-PKR609` warning (`AllowYankedWithWarning`). Silent inclusion is not allowed.
 
 ## Diagnostics
 

@@ -13,9 +13,7 @@ use crate::diagnostic::Diagnostic;
 use crate::semantic_workspace::SemanticWorkspaceSource;
 use crate::workspace_graph::WorkspaceSource;
 
-use super::{
-    ProjectManifest, ProjectRevision, MAX_PATH_BYTES, MAX_SOURCES, MAX_TOTAL_SOURCE_BYTES,
-};
+use super::{ProjectManifest, ProjectRevision, MAX_PATH_BYTES, MAX_TOTAL_SOURCE_BYTES};
 
 #[cfg(all(
     unix,

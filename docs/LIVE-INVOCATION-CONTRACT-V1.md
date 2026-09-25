@@ -11,10 +11,9 @@ Audience: implementers of the fourteen open issues in this lane (#109–#116,
 #178–#181) that consume these interfaces, and reviewers of the identity,
 authority and recovery contract per #108's review checkpoint.
 
-This is a design checkpoint with a small executable reference, per #108's
-bounded scope ("Produce one owned design and a small executable
-journal/reference state machine... not permission to rewrite the frozen
-runtime"). This reference kernel remains separate from the compiled pipeline.
+This is the bounded #108 design checkpoint and small executable journal
+reference, not permission to rewrite the frozen runtime. The reference kernel
+remains separate from the compiled pipeline.
 Later source-role lowering and the typed live driver now execute a declared
 `propose` model role through an injected source adapter and compiler-derived
 proposal decoding. That route is described by

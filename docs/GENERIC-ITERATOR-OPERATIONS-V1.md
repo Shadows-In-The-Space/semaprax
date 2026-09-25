@@ -7,9 +7,9 @@ Public package/ABI support promotion remains separately gated.
 
 Audience: compiler contributors, reviewers, and agent authors.
 
-This profile supports private authored operations over the consuming scalar
-iterator protocol from [Owning Iterators v1](OWNING-ITERATORS-V1.md). The
-consuming loop syntax remains owned by [Owning Iterator Loops v1](OWNING-ITERATOR-LOOPS-V1.md).
+Private authored operations can use the consuming scalar iterator protocol
+from [Owning Iterators v1](OWNING-ITERATORS-V1.md). The separate
+[Owning Iterator Loops v1](OWNING-ITERATOR-LOOPS-V1.md) still owns loop syntax.
 
 ## Checked signatures
 

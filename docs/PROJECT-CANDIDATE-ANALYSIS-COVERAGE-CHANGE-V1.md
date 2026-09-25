@@ -21,8 +21,7 @@ with a bundle it invokes that exact candidate's existing
 `analysis_boundary_bundle` owner, which authenticates the candidate selector,
 canonical bundle bytes and digest and independently replays the deployment,
 generated-file, and external-API child declarations through their owning APIs.
-Neither nested coverage report nor any evidence status is supplied or trusted
-by the caller.
+Callers supply bundles, not coverage reports or trusted evidence statuses.
 
 The closed report schema is
 `semaprax.project-candidate-analysis-coverage-change.v1`, bounded to 5 MiB. It
@@ -47,21 +46,20 @@ the only comparison input.
 
 ## Categorical result
 
-The comparison is about authenticated evidence status, never real-world coverage.
+The comparison tracks authenticated evidence status, not real-world coverage.
 Exact equal rows are `unchanged`. A change from `not_inspected` to `partial` or
 `known` is `advanced`; the reverse is `regressed`. Different rows at the same
 status are `unknown`, because changed basis or limitations cannot be ordered.
 No percentage, score, ranking, completeness, compatibility, or behavioral
 equivalence is inferred.
 
-This v1 composes only the existing three-declaration boundary bundle. Therefore
-deployment, generated-file, and external-API rows can truthfully advance or
-regress when one side has independently authenticated declarations and the
-other does not. Runtime and external-consumer rows are regenerated from their
-source-only coverage owners and remain unchanged in this version. The method
-accepts no runtime result, test policy, package graph, consumer inventory,
-filesystem path, or network handle. Their distinct evidence owners are not
-silently imported.
+This v1 uses only the existing three-declaration boundary bundle. Deployment,
+generated-file, and external-API rows can advance or regress when one side has
+independently authenticated declarations and the other does not. Runtime and
+external-consumer rows still come from their source-only coverage owners, so
+they remain unchanged. The method accepts no runtime result, test policy,
+package graph, consumer inventory, filesystem path, or network handle; it does
+not bring in evidence from those separate owners.
 
 `SPX-G492` owns closed report/binding failures and `SPX-G493` owns capacity.
 Every result keeps source, publication, filesystem, network, execution, and

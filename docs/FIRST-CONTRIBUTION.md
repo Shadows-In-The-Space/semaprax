@@ -1,70 +1,44 @@
 # First contribution
 
-Status: living internal contributor documentation.
+Status: living contributor guide.
+Audience: first-time contributors and agents.
 
-Audience: new contributors and coding agents making a first change here.
+This page shows the order of work, not new project rules. Read
+[`AGENTS.md`](https://github.com/wavect/semaprax/blob/main/AGENTS.md) for invariants,
+[Development](DEVELOPMENT.md) for required references,
+[Quality gates](QUALITY-GATES.md) for verification, and the
+[Completion matrix](COMPLETION-MATRIX.md) for feature status.
 
-This page is only the sequenced "what do I actually type" layer. It adds no
-rule and repeats no policy. [`AGENTS.md`](https://github.com/wavect/semaprax/blob/main/AGENTS.md) owns the operating
-invariants and the change protocol, the [development guide](DEVELOPMENT.md)
-owns the [read order](DEVELOPMENT.md#read-before-changing-semantics) and the
-change-area reference table, [quality gates](QUALITY-GATES.md) owns
-verification policy, and the [completion matrix](COMPLETION-MATRIX.md) is the
-only status authority. Read those. This walks one change past them in order.
+## 1. Choose a small change
 
-## 1. Pick a change the router keeps small
+A broken link, missing documentation metadata, or one example is a good first
+task. A change to evaluation order, ownership, cleanup, capabilities, or an
+evidence boundary is not: those need coordinated compiler and backend work.
 
-`changed` narrows the gate set only for path shapes it classifies. Everything
-else widens the whole run to `full`. The classifications live in
-`src/quality_route.rs`:
+The `changed` quality profile recognizes only certain paths, such as
+documentation, CLI, and editor files. Other paths widen to `full`. See
+`src/quality_route.rs` and preview the route in step 6 before running it.
 
-| Classification | Paths |
-| --- | --- |
-| `documentation-truth` | `README.md`, `CHANGELOG.md`, any path under `docs/` ending `.md` |
-| `agent-context-economics` | `src/agent_economics.rs`, `tests/agent_economics.rs`, `benchmarks/agent-context-v1/`, `tests/snapshots/agent_context_*`, `tests/snapshots/agent_economics.*` |
-| `cli-surface` | `src/cli/`, `src/cli_driver/`, `src/bin/`, `src/cli_driver.rs`, `src/main.rs`; adds the `test-cli` gate |
-| `editor-adapter` | `editors/`; adds the `test-editor` gate |
-| `broad-compiler-or-graph-dispatch` | `src/graph.rs` |
-| `unmapped-or-wide` | every other path |
+## 2. Find the owner of the change
 
-So a first change confined to documentation, an example, the CLI surface, or
-the editor extension costs the narrow route; any other `.rs` edit costs a
-full-workspace run. Cheap first shapes:
-
-- a broken local link, a missing `Status:`/`Audience:` line, or a missing
-  `SUMMARY.md` entry — `tests/documentation.rs` already names the failure;
-- an example project under `examples/` plus its entry in the `example-checks` and
-  `example-fmt` loops in `scripts/quality.sh`; keep the project's `README.md`
-  in sync with any new build/run/test instructions.
-- one diagnostic's wording together with its regression;
-- a module split that lowers an entry in `tests/module-size-budget.tsv`.
-
-Do not start with anything the [non-negotiable
-invariants](https://github.com/wavect/semaprax/blob/main/AGENTS.md#non-negotiable-invariants) name — evaluation order,
-cleanup-plan order, evidence capsules, capabilities. Change protocol item 3
-requires parser, canonical formatter, resolver/HIR, verifier, semantic graph,
-native backend and Wasm backend to move together, which is not a first change.
-
-## 2. Find the specification that owns the area
-
-Three lookups, in this order:
+Start with the repository context graph. It points to the code and documents
+that own a question:
 
 ```sh
-rg -n -i '<topic>' docs/DEVELOPMENT.md      # change area -> owning references
-rg -n -i '<topic>' docs/QUALITY-GATES.md    # change shape -> minimum evidence
-rg --files docs | rg -i '<topic>'           # candidate versioned specs by name
+graft map
+graft ask '<topic or exact symbol>' --source
 ```
 
-Worked example. A diagnostic code is the fastest thing to trace, because the
-owner and the emit site both carry it:
+Then use [Development](DEVELOPMENT.md#read-before-changing-semantics) for the
+required reading order and [Quality gates](QUALITY-GATES.md) for the test that
+proves your change. For an exhaustive search, use `graft grep`; ranked `ask`
+results are not exhaustive. An exact diagnostic code is a useful query:
 
 ```sh
-rg -n 'SPX-U105' docs src
+graft ask 'SPX-U105' --source
 ```
 
-That reports `docs/EXPLICIT-MUTATION-V1.md` (the owning table entry that
-defines the code) and `src/hir/resolve_expr.rs` (the site that emits it).
-Wording changes in one without the other are a drift, not a fix.
+Check both the owning specification and the emitter before changing wording.
 
 ## 3. Find the completion-matrix rows
 
@@ -72,40 +46,30 @@ Wording changes in one without the other are a drift, not a fix.
 rg -n -i '<topic>' docs/COMPLETION-MATRIX.md
 ```
 
-Read the row's status word against [status
-rules](COMPLETION-MATRIX.md#status-rules) before you claim anything. Local,
-hosted, private, public and proof-only evidence are distinct there, and none
-implies another. You edit the matrix only if your change moves a row's stated
-gate; that is step 8, not now.
+Read the [status rules](COMPLETION-MATRIX.md#status-rules) before making a
+claim. Local, hosted, private, public, and proof-only evidence are different.
+Change a matrix row only when its status or required gate actually changes.
 
-## 4. Read the meaning, not the source text
+## 4. Ask the compiler about `.spx` meaning
 
-The compiler projects the semantics you are about to change. Use that instead
-of reconstructing it from `.spx` text:
+For one declaration, use the bounded `context` command. Use `graph` only when
+you need the whole module:
 
 ```sh
-cargo run --locked -p semaprax -- graph examples/meaning.spx
 cargo run --locked -p semaprax -- context examples/meaning.spx math.add --depth 1
+cargo run --locked -p semaprax -- graph examples/meaning.spx
 ```
 
-Both print one line of JSON, so pipe them through a filter. `graph` reports the
-schema, a source-bound `revision` digest, and a node per declaration; against
-`examples/meaning.spx` it opens with
-`{"schema":"semaprax.graph.v10","revision":"sha256:...`. The stable id in the
-`context` call is a declaration's `@id("...")` — `math.add` above — or any node
-`id` the graph printed. `context` additionally reports the `budget` and
-`truncation` it applied, so a truncated answer tells you to raise `--depth`
-rather than to guess.
-
-Use `rg` and `rg --files` for Rust and host-code navigation. Read
+`math.add` is a declaration's stable `@id`. Both commands print JSON.
+`context` reports if it truncated the answer; raise its depth or byte budget
+instead of guessing. Use `rg` for bounded Rust searches. Read
 [ADR 0001](decisions/0001-graphify.md) before adding a repository-wide index.
 
 ## 5. Put the test in the harness that owns its subject
 
-`tests/` holds harness roots, not one file per case. A new top-level file
-statically links the whole compiler again, which is what the harness
-convention exists to avoid; [architecture](ARCHITECTURE.md#integration-test-harnesses)
-owns the rule and the cases that must stay standalone.
+Add a case to the harness that owns it. Each new top-level test file links the
+whole compiler again; [Architecture](ARCHITECTURE.md#integration-test-harnesses)
+lists the exceptions.
 
 ```sh
 ls tests/*.rs                 # the harness roots; pick the one owning the subject
@@ -113,69 +77,80 @@ ls tests/language/            # that harness's modules
 rg -n '^mod |^#\[path' tests/language.rs
 ```
 
-Add the body as `tests/<group>/<name>.rs`, declare it in `tests/<group>.rs`, and
-keep the `#[path]` — a bare `mod foo;` in a test crate root resolves to
-`tests/foo.rs`, not into the directory:
+Put the case in `tests/<group>/<name>.rs` and declare it from the harness root
+with `#[path]`:
 
 ```rust
 #[path = "<group>/<name>.rs"]
 mod <name>;
 ```
 
-Then run just your module. The `module::` prefix matters, because a bare second
-positional is read as a second libtest filter:
+Run the narrow selector. Keep the `module::` prefix; otherwise libtest may
+interpret the name as another filter:
 
 ```sh
 cargo test --locked -p semaprax --test <group> <name>::<case>
 ```
 
-Two constraints follow from sharing one binary: every fixture prefix in a
-harness must be distinct, and a `tests/support/*.rs` file is declared once in
-the harness root and used as `crate::<name>`. `tests/harness_isolation.rs`
-checks the first.
+Use a unique fixture prefix within the harness. Declare shared
+`tests/support/*.rs` modules once in its root.
 
 ## 6. Run a profile
 
-Preview the route before running it. `--plan` prints and validates the plan and
-exits without dispatching a gate:
+Preview the route without running tests:
 
 ```sh
 scripts/quality.sh changed --plan
 ```
 
-The plan is a `semaprax.quality-route.v2` record set naming the effective
-profile, the reason it was chosen, and each gate in order. A documentation-only
-change set plans as `effective changed` with reason
-`complete-git-state-has-narrow-mappings`; add one line to
-`src/quality_route.rs` and the same change set plans as `effective full` with
-reason `git-state-includes-wide-or-unmapped-path`.
+The plan names the profile, why it was chosen, and each gate in order. A
+documentation-only change normally routes to `changed`; an unmapped source
+file widens it to `full`.
 
-| Profile | Gate ids | What it costs |
-| --- | --- | --- |
-| `quick` | `diff-check`, `fmt-check`, `check-workspace`, `test-advisory` | A workspace check and the four advisory test targets. No Clippy, no rustdoc, no release build |
-| `changed` | `quick`'s four plus `clippy-package`, `test-agent-context`, `rustdoc-package`; then `test-cli` when the change set touches `cli-surface` paths and `test-editor` when it touches `editor-adapter` paths | Adds strict package Clippy, the compiler and agent-context integration targets, and package rustdoc; the CLI harnesses (including the full toolchain's help surface) or the extension's `node --test` run only for their own paths |
-| `full` | `diff-check`, `fmt-check`, `check-workspace`, `test-advisory`, `clippy-workspace`, `test-workspace`, `doctest-workspace`, `rustdoc-workspace`, `build-release`, `package`, `example-checks`, `example-fmt` | Adds workspace Clippy, the whole workspace test and doctest run, workspace rustdoc, a release build, the package check, and the canonical example loops. `test-workspace` is the disk hazard below |
+| Profile | What it runs |
+| --- | --- |
+| `quick` | Diff, formatting, workspace check, and advisory tests. |
+| `changed` | `quick` plus package Clippy, agent-context tests, and package rustdoc; CLI or editor tests only when those paths changed. |
+| `full` | Workspace-wide checks, tests, docs, release build, package check, and example loops. This can use more than 10 GB of build space. |
 
-`scripts/quality.sh` is the source of truth for each gate's exact command; do
-not copy that sequence elsewhere. During a run the script writes each gate name
-to standard error before starting it, so a long gate stays attributable.
+The plan uses `semaprax.quality-route.v2`. Its route labels explain why a
+profile was selected:
 
-Two routing surprises to expect from `changed`:
+| Labels | Meaning |
+| --- | --- |
+| `documentation-truth`, `agent-context-economics` | Documentation or bounded agent-context work. |
+| `cli-surface`, `editor-adapter` | CLI or editor-facing changes. |
+| `broad-compiler-or-graph-dispatch`, `unmapped-or-wide` | Changes that need the full profile. |
+| `complete-git-state-has-narrow-mappings` | All changed paths have narrow mappings. |
+| `git-state-includes-wide-or-unmapped-path` | At least one path widens the profile. |
+| `changed-worktree-is-empty` | No changed paths were found, so routing widens. |
 
-- It needs a base. With none configured it refuses: `changed quality routing
-  requires SEMAPRAX_QUALITY_BASE, SEMAPRAX_QUALITY_TARGET_REF, or configured
-  origin/HEAD`. `SEMAPRAX_QUALITY_BASE` takes a full commit id that is an
-  ancestor of `HEAD`; `SEMAPRAX_QUALITY_TARGET_REF` must be an exact
-  `refs/remotes/` reference. With `origin/main` fetched, the simplest working
-  form is `SEMAPRAX_QUALITY_BASE=$(git merge-base origin/main HEAD)`.
-- On a clean worktree it widens to `full` with reason
-  `changed-worktree-is-empty`. Run it after you have edits, not before.
+The executor reports gate names in order. The narrow routes include
+`diff-check`, `fmt-check`, `check-workspace`, `test-advisory`,
+`clippy-package`, `test-agent-context`, `rustdoc-package`, `test-cli`, and
+`test-editor` as applicable. The full route also uses `clippy-workspace`,
+`test-workspace`, `doctest-workspace`, `rustdoc-workspace`, `build-release`,
+`package`, `example-checks`, and `example-fmt`.
 
-For a documentation-only change, [quality
-gates](QUALITY-GATES.md#documentation-changes) names the minimum, and
-[change-specific evidence](QUALITY-GATES.md#change-specific-evidence) names the
-focused evidence your owning specification adds on top of the profile. Editing
-prose is not evidence for a technical claim.
+The exact gate commands live in `scripts/quality.sh`; do not duplicate them.
+Use [Quality gates](QUALITY-GATES.md) for the required profile and focused
+evidence. Prose edits do not prove technical claims.
+
+Two `changed` routing surprises:
+
+- It needs a base commit. Fetch `origin/main`, then set
+  `SEMAPRAX_QUALITY_BASE=$(git merge-base origin/main HEAD)` if your
+  environment has no configured base.
+- A clean worktree widens to `full`. Preview after you have edits.
+
+If the base is missing, the router says "changed quality routing requires
+SEMAPRAX_QUALITY_BASE, SEMAPRAX_QUALITY_TARGET_REF, or configured origin/HEAD".
+If a target ref is not a remote-tracking ref, it says "must be an exact
+refs/remotes/ reference". Fix the Git input, then preview again.
+
+For documentation-only changes, see the
+[documentation gate](QUALITY-GATES.md#documentation-changes). The owning
+specification may require more focused checks.
 
 ## 7. Local hazards you will otherwise hit
 

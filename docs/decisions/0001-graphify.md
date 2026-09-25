@@ -2,15 +2,20 @@
 
 Audience: maintainers and compiler contributors.
 
-Status: accepted, revisit as the platform-host codebase grows.
+Status: accepted decision about Graphify; the current repository navigation
+tool is Graft, as described in [AGENTS.md](../../AGENTS.md).
 
 ## Decision
 
-Do not add Graphify as a SEMAPRAX build, development, or agent bootstrap dependency yet. Use lean-ctx for bounded repository navigation and SEMAPRAX's own `graph` and `context` commands for `.spx` program meaning.
+Do not add Graphify to the build or agent bootstrap. Use `graft ask --source`
+for repository code navigation, and SEMAPRAX's own `graph` and `context`
+commands for checked `.spx` meaning. Graft's code index is not SEMAPRAX's
+semantic graph.
 
 ## Evidence
 
-A local code-only assessment used Graphify 0.9.25 against commit `7e3d294` with generated output isolated under `/private/tmp`:
+A historical, local assessment tested Graphify 0.9.25 at commit `7e3d294`.
+It kept generated output in `/private/tmp`:
 
 ```sh
 graphify extract . --code-only --no-cluster --out /private/tmp/semaprax-graphify
@@ -26,18 +31,21 @@ graphify benchmark /private/tmp/semaprax-graphify/graphify-out/graph.json
 | Bounded query | The 500-token `Parser` slice was useful |
 | Benchmark | Failed with `KeyError: 'links'` against the newly generated graph |
 
-The assessment therefore found useful bounded symbol queries, but also found that:
+The query was useful, but the assessment found that:
 
 - `.spx`, `.spatch`, and `Cargo.toml` were not indexed;
 - the generated graph was larger than the indexed source;
 - the tested pre-1.0 tool's benchmark command failed on its newly generated graph;
 - SEMAPRAX already owns the authoritative semantic graph for the language it compiles.
 
-Committing a second, incomplete generated graph would currently increase cache churn and create competing notions of program meaning.
+That result did not justify committing another incomplete generated graph.
+The current Graft index is ignored buildable context, not the authoritative
+representation of `.spx` meaning.
 
 ## Revisit gate
 
-Re-evaluate when substantial Rust, Swift, Kotlin, JavaScript/TypeScript, C/C++, and platform-host trees exist. Adoption requires:
+Re-evaluate Graphify only if it adds value beyond the current Graft workflow.
+Adoption would require:
 
 1. A pinned, audited tool version installed outside the Cargo dependency graph.
 2. Local code-only extraction by default; no model-backed document ingestion without explicit capability approval.

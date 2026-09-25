@@ -9,17 +9,14 @@ evidence-runner authors.
 
 ## Purpose
 
-The supported `function_signature_review_publish_v1` workflow has one closed
-ordered review phase and one separately authorized publication phase. Every
-ordered step now carries a `response_contract` in the selected capabilities
-document. The contract makes the response's required grant, effect, authority
-boundary, and analysis-boundary treatment explicit before an agent submits the
-request.
+`function_signature_review_publish_v1` has an ordered review phase and a
+separately authorized publication phase. Each step has a `response_contract`
+in the selected capabilities document. Before sending a request, an agent can
+see the required grant, effect, authority boundary, and limits of analysis.
 
-This is selected-profile accountability metadata. It does not add fields to
-the frozen `semaprax.image-agent-result.v5` success envelope and must not be
-described as self-description embedded in each wire response. The packaged
-TypeScript workflow now resolves, validates, and freezes the matching contract
+This metadata belongs to the selected profile, not to each wire response. It
+adds no field to the frozen `semaprax.image-agent-result.v5` success envelope.
+The packaged TypeScript workflow resolves, validates, and freezes the matching contract
 beside every attempted RPC in its immutable transcript, so its returned
 workflow observations carry authority and blind-spot accountability without
 changing those wire bytes.

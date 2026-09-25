@@ -24,14 +24,12 @@ run project tests or execute a target.
 
 ## Bounded scope and non-goal
 
-This is a compact, read-only join over an *existing* evidence artifact
-(`semaprax.assurance-manifest.v1`), not a second competing evidence system. It
-never calls `assurance_manifest::generate` itself: every envelope is supplied
-by the caller (a test harness, a CLI wrapper once one exists, or a future
-SMT/model-checking/proof-kernel producer) and independently re-verified and
-rebound here. It is not a general multi-file cross-reference checker: each
-supplied envelope is bound to exactly one candidate source path, and nothing
-is inferred about relationships between files.
+This read-only operation joins existing `semaprax.assurance-manifest.v1`
+evidence. It never calls `assurance_manifest::generate`: the caller supplies
+each envelope, which is independently verified and bound to one exact candidate
+source path. Callers may be test harnesses, a future CLI wrapper, or future
+SMT/model-checking/proof-kernel producers. The join does not infer relationships
+between files or replace the existing evidence system.
 
 ## Library API and binding
 
@@ -150,7 +148,7 @@ requirement that "an agent under evaluation must not be able to edit its own
 acceptance," applied structurally here: the function's own decision path has
 no branch that can be reached when `proposer == reviewer`.
 
-This is a string-identity check, not a cryptographic authentication system.
+This checks whether two strings differ; it does not authenticate identities.
 Matching every other evidence artifact in this codebase
 (`OwnedWorkflowApproval`'s `approval_authority: false`,
 `analysis_*_evidence`'s `publication_authority: false`), the returned record

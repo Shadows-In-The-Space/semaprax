@@ -33,10 +33,9 @@ naming collision worth stating plainly rather than leaving implicit:
   interpretation, semantic query, candidate validation, and selected
   execution without spawning the CLI or receiving ambient host authority."
 
-Concretely: a host wanting the vector-embedding boundary imports
-`semaprax::semantic_embedding`; a host wanting to check SEMAPRAX source
-in-process imports `semaprax::embedding_api`. Neither module re-exports or
-depends on the other.
+Import `semaprax::semantic_embedding` for vector embeddings, or
+`semaprax::embedding_api` to check SEMAPRAX source in-process. Neither module
+re-exports or depends on the other.
 
 ## What issue #203 asks for, and where each part actually stands on `main`
 
@@ -63,9 +62,8 @@ returns. It carries `unit_name` (echoed back, never read from disk),
 (present exactly when `ok` is `true`). It deliberately never carries
 [`crate::ast::Program`], [`crate::hir::Analysis`], or
 [`crate::hir::ResolvedProgram`] — issue #203's "Validated internals remain
-compiler-owned" acceptance criterion applied literally: an embedder gets a
-report, never a value whose internal shape this crate is free to change
-release to release.
+compiler-owned" acceptance criterion applied literally: embedders receive reports, not compiler internals whose shape may change
+between releases.
 
 ### Diagnostics are never discarded on success
 

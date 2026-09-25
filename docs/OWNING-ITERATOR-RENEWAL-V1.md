@@ -5,10 +5,10 @@ Status: implemented private renewal profile; **HOSTED GREEN** under the
 
 Audience: compiler contributors, reviewers, and agent authors.
 
-This profile defines conditional same-owner renewal for a mutable `Vec<T>`
-binding inside an `If` branch of an authenticated consuming `for own` loop. It
-covers the compiler-owned intrinsic assignment
-`output = vec_push<T>(output, item)` when the loop's checked ownership facts
+This profile allows conditional same-owner renewal of a mutable `Vec<T>` in
+an `If` branch of an authenticated consuming `for own` loop. It covers the
+compiler-owned intrinsic assignment `output = vec_push<T>(output, item)` when
+checked ownership facts
 prove that `output` is the same owner on both sides of the assignment.
 
 ## Renewal boundary

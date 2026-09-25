@@ -10,13 +10,11 @@
 
 ## Summary
 
-This RFC defines the target-neutral recovery contract required after a native
-owned call crosses its atomic ownership commit. It introduces a host-allocated
-linear recovery frame, compiler-certified checkpoints, a one-shot settlement
-decision, an idempotent `settle` operation, and an authenticated quiescence
-receipt. The purpose is to make normal completion, semantic failure, returned
-physical failure, malformed provider output, and host unwinding converge on one
-bounded cleanup protocol without guessing which physical resources remain live.
+This RFC defines recovery after a native owned call crosses its atomic ownership
+commit. It uses a host-allocated linear frame, certified checkpoints, one
+settlement decision, idempotent `settle`, and an authenticated quiescence
+receipt. Normal completion, semantic/physical failure, malformed output, and
+host unwinding all use one bounded cleanup protocol without guessing live resources.
 
 The repository contains an internal, target-neutral model of the bounded
 certificate, progress graph, frame, phase-aware transaction, decision,

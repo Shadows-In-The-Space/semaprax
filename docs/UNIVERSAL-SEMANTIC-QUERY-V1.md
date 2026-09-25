@@ -11,26 +11,24 @@ reviewers of revision-bound semantic reads.
 
 Universal Semantic Query v1 is the first closed query envelope over one
 immutable [Persistent Incremental Semantic Workspace Service
-v1](PERSISTENT-INCREMENTAL-SEMANTIC-SERVICE-V1.md) snapshot. It gives CLI, MCP,
-LSP, and other adapters one canonical request/result/replay boundary
-without making adapter behavior part of the core. The later read-only
+v1](PERSISTENT-INCREMENTAL-SEMANTIC-SERVICE-V1.md) snapshot. CLI, MCP, LSP and other adapters share one canonical request/result/replay
+boundary; their behavior stays outside the core. The later read-only
 [Universal Semantic Workflow CLI v1](UNIVERSAL-SEMANTIC-WORKFLOW-CLI-V1.md)
 constructs these same typed operations and returns their exact results; it adds
 no query schema or alternate execution path.
 
 [Installed Agent Guidance v1](INSTALLED-AGENT-GUIDANCE-V1.md) separately exposes
 installed operation metadata through `query --capabilities`.
-That authority-free document is static installed-support metadata, not a
-revision-bound query result or live service discovery, and it cannot enable an
-operation.
+That static document describes installed support without granting authority.
+It is neither a revision-bound result nor live service discovery, and cannot
+enable an operation.
 
 The additive v1 operation set contains eight operations: `declarations`,
 `symbol`, `context`, `impact`, `available_operations`,
-`ownership_at_expression`, `declaration_consumers`, and `next_constructs`. The
-implementation reuses the existing Project declaration query, Semantic
-Workspace Image symbol lookup, Workspace Analysis context and impact, and
-Universal Semantic Transaction eligibility classifier. It does not create a
-parallel semantic index or a second operation-eligibility truth. The first
+`ownership_at_expression`, `declaration_consumers`, and `next_constructs`. The implementation reuses Project declaration queries, Semantic Workspace
+Image symbol lookup, Workspace Analysis context and impact, and Universal
+Semantic Transaction eligibility checks. It creates neither a parallel
+semantic index nor a second source of operation-eligibility rules. The first
 seven operations carry **HOSTED GREEN** evidence under the v0.4.0 release
 baseline named above; `next_constructs` is a later additive operation with
 local evidence only (see its own section below), and adding it does not
@@ -72,8 +70,7 @@ pub struct SemanticQueryResult { /* opaque */ }
 
 `SemanticWorkspaceSnapshot::query` accepts a typed `SemanticQuery`.
 `SemanticWorkspaceService::query` accepts exact canonical query bytes and
-executes them against one snapshot of the active generation. Neither method
-refreshes the service or mutates its semantic cache.
+executes them against one snapshot of the active generation. Neither method refreshes the service or changes its semantic cache.
 
 ## Canonical request and result
 

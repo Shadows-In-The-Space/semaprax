@@ -7,13 +7,12 @@ their narrower scope; public promotion and broader product completion remain
 separately gated.
 Audience: compiler, package-tooling, and semantic-evidence contributors.
 
-Offline Multi-Package Source Capsule v1 is an additive, authority-free bridge
-between exact Resolver-v1 selection and a future linked package build. It
-authenticates two through four caller-owned canonical SEMAPRAX sources, proves
-that their source-derived import graph is exactly the selected Subject-v2
-dependency graph, checks their typed scalar interfaces against the selected
-Report-v2 facts, and retains the ordinary verified linked HIR for an internal
-consumer. Dependency metadata is never parsed or executed as source.
+This authority-free capsule connects exact Resolver-v1 selection to a future
+linked package build. It authenticates two to four caller-owned canonical
+SEMAPRAX sources, matches their source-derived import graph to the selected
+Subject-v2 dependency graph, checks typed scalar interfaces against Report-v2,
+and retains verified linked HIR for an internal consumer. Dependency metadata
+is never parsed or executed as source.
 
 ## Frozen API
 

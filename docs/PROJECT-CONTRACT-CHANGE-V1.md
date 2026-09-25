@@ -8,10 +8,10 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-The additive `add_contract` intention appends exactly one typed predicate to
-an explicit, monomorphic, top-level non-main function in an immutable
-[Project Candidate](PROJECT-CANDIDATES-V1.md). It grants no source publication
-or execution authority and introduces no new source-language syntax.
+Use `add_contract` to append one typed predicate to an explicit, monomorphic,
+top-level non-main function in an immutable [Project Candidate](PROJECT-CANDIDATES-V1.md).
+It adds no source-language syntax and grants no source publication or execution
+authority.
 
 ## Intention and context
 
@@ -38,9 +38,9 @@ bindings are unavailable. Calls must resolve through existing local/import
 stable-ID bindings; this operation cannot add imports, effects or capabilities.
 
 The ordinary verifier decides boolean typing, contract purity, allowed call
-semantics, ownership, loans and cleanup. A syntactically valid JSON object is
-not a validation receipt. Adding a precondition may restrict valid inputs;
-adding a postcondition may introduce runtime contract failure. Full candidate
+semantics, ownership, loans and cleanup. Valid JSON syntax does not mean the operation has passed validation. A new
+precondition may restrict valid inputs; a new postcondition may cause a runtime
+contract failure. Full candidate
 admission does not prove all executions satisfy the new predicate or establish
 external API compatibility.
 

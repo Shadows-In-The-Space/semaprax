@@ -8,9 +8,9 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-This opt-in invocation-owned cache actually avoids the lexer/parser and
-canonical formatter calls for unchanged, unaffected modules. It retains
-compiler-created source ASTs, then clones them for a fresh build. Every module
+This opt-in cache belongs to one invocation. It skips lexer/parser and canonical
+formatter calls for unchanged, unaffected modules by retaining compiler-created
+source ASTs and cloning them for a fresh build. Every module
 still undergoes semantic resolution, imported-stub validation, cross-file
 identity/import/dependency checks, complete linking, graph construction, and
 the ordinary manifest-selected Project profile admission. There is **no checked
@@ -23,9 +23,8 @@ checked-module reuse and emits its own work schema; it does not change this
 report's zero-HIR contract or make the source-backed store warm.
 
 Project finalization reuses the exact retained source AST for source Agent
-extraction and prelude-bound source revision construction/replay. Each borrow
-checks both source bytes and path; it neither clones the AST nor adds a frontend
-cache hit. The revision hashing inputs and independent preflight fact checks
+extraction and prelude-bound source revision construction/replay. Each borrow checks the source bytes and path. It neither clones the AST nor
+counts as a frontend cache hit. The revision hashing inputs and independent preflight fact checks
 remain unchanged. A parser-call regression covers unchanged calculator builds
 in both cache modes; this is local work-elimination evidence, not a measured
 speedup or a claim that every Project profile performs zero parser calls.

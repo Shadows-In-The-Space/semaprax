@@ -1,13 +1,15 @@
 # Agent operation checkpoint v2
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 live adapter and joined Runtime v2 integration.
-
 Audience: runtime integrators and compiler contributors.
 
-The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only evidence status. The original focused corpus records four durable
-execution cases and eight checkpoint codec cases, plus ordinary and durable
-joined-runtime integration; the selectors below own the current test inventory.
+This adapter checkpoints one typed effect at a time so recovery can resume
+without guessing whether host work occurred. The caller supplies and controls
+the store; a checkpoint hash is not host authority.
+
+Status: **HOSTED GREEN** for the bounded v0.4.0 live adapter and joined Runtime
+v2 integration under the [release baseline](RELEASE-0.4.0-STATUS.md). The focused
+corpus covers four durable execution cases, eight codec cases, and joined
+runtime integration; the selectors below define the current inventory.
 
 `CompiledTypedEffects::run_durable` executes the same retained iterative stages
 and typed registry through the private IterativeDriver hooks. The ordinary

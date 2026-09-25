@@ -11,13 +11,12 @@ compiler contributors.
 
 ## Purpose
 
-Documentation that is written by hand drifts from the compiler that ships.
-`semaprax doc` removes the hand: it renders the documentation of one module
-from the checked program, carrying the same declaration identities, signatures,
-ownership modes, effects, and contracts that `semaprax graph` emits, and the
-same graph revision. A reader, an agent, or an editor can therefore match a
-page of documentation to the exact semantic graph it describes, and a gate can
-prove that the two never name different declarations.
+Handwritten documentation can drift from the compiler. `semaprax doc` renders
+one module's documentation from its checked program. It uses the same graph
+revision, declaration identities, signatures, ownership modes, effects and
+contracts as `semaprax graph`. Readers, agents and editors can match the page
+to that exact semantic graph; a gate can check that both name the same
+declarations.
 
 This is the first step of one larger rule: compiler-bundled agent material and
 human documentation are generated from the same versioned semantic graph as
@@ -38,9 +37,9 @@ semaprax doc <file> [--json]
 - The grammar is closed: exactly one file, at most one `--json`, no other
   option. A malformed invocation exits with status two.
 
-The command reads the source file and writes stdout. It creates no file,
-resolves no project, and uses no ambient authority. Redirecting the output is
-the caller's publication action.
+The command reads a source file and writes stdout. It creates no files,
+resolves no Project and uses no ambient authority. If output is redirected,
+publication is the caller's action.
 
 ## The model
 

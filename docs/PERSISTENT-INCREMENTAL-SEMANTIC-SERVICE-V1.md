@@ -9,12 +9,11 @@ broader product completion remain separately gated.
 Audience: compiler contributors, workspace-service hosts, agent-tool authors,
 and reviewers of incremental semantic state.
 
-Persistent Incremental Semantic Workspace Service v1 is the first
-transport-neutral service core over an admitted immutable `ProjectRevision`.
-It retains one indivisible semantic generation and one compiler-created
-checked-module cache inside the caller's process. It supports revision-bound
-read snapshots, bounded semantic query delegation, source-exact incremental
-refresh, and authority-free Universal Semantic Transaction validation.
+This transport-neutral service core holds one immutable admitted
+`ProjectRevision`, one indivisible semantic generation, and a compiler-created
+checked-module cache in the caller's process. It provides revision-bound reads,
+bounded semantic queries, source-exact incremental refresh, and authority-free
+Universal Semantic Transaction validation.
 
 This badge is a library core, not a daemon or persistent public service route.
 The separate [Universal Semantic Workflow CLI

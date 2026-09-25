@@ -19,13 +19,13 @@ ordinary v1 persistence/loading retain their existing Unix-only admission.
 The standalone compiler's legacy Windows persistence/loading entry points
 reject with `SPX-I215`; they have no physical Windows host dependency. Its
 hidden `windows_host` seam prepares opaque canonical facts and independently
-replays loaded bytes. The private toolchain alone connects that seam to retained
-Windows handles; callbacks and evidence do not grant ambient filesystem authority.
+replays loaded bytes. Only the private toolchain connects that seam to retained Windows handles.
+Callbacks and evidence grant no ambient filesystem authority.
 
 The new schema is `semaprax.project-revision-store-windows-entry.v1`; its entry
 digest domain is `semaprax.project-revision-store-windows.entry-digest.v1\0`.
-Length framing and the exact entry tree, field order, Project/source bindings,
-limits, and complete replay follow [Project Revision Store v1](PROJECT-REVISION-STORE-V1.md).
+The entry tree, field order, length framing, Project/source bindings, limits
+and complete replay follow [Project Revision Store v1](PROJECT-REVISION-STORE-V1.md).
 Only two ordered nonclaims change in the new profile:
 
 - `requires_trusted_exclusive_current_euid_root` becomes

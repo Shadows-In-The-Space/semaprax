@@ -6,8 +6,8 @@ maintainers.
 Status: bounded GEN-05B/GEN-05C internal tranche hosted on Linux. The pre-nested-relay
 generic-owned corpus is hosted green in [CI run 34031917437, Ubuntu job
 101482963175](https://github.com/wavect/semaprax/actions/runs/34031917437/job/101482963175).
-The additive nested-relay and identity-forwarding selectors have **no
-successful hosted run on record**. This document previously called them
+The additive nested-relay and identity-forwarding selectors have **no successful
+hosted run on record**. This document previously called them
 "hosted green in CI run 34048713967, Ubuntu job 101528399406"; that job
 (`Rust ubuntu-latest`) concluded **cancelled**, and no Rust lane in that run
 succeeded — `Rust macos-latest` and `Rust windows-latest` were cancelled and
@@ -31,10 +31,9 @@ support, or a public generic ABI.
 
 ## Purpose and boundary
 
-This contract composes the existing explicit generic-record identity and
-substitution rules with the flat Owned Byte Record v1 ownership model. It
-admits concrete instances such as `Box<Bytes>` and `Pair<Bytes, bool>` without
-making a type parameter itself an executable owned carrier.
+This contract combines explicit generic-record identity/substitution with Flat
+Owned Byte Record v1 ownership. It admits `Box<Bytes>` and `Pair<Bytes, bool>`
+without making a type parameter an executable owned carrier.
 
 An admitted instance:
 
@@ -48,14 +47,11 @@ An admitted instance:
 - has, after substitution, only `Bytes`, admitted Copy-scalar, or admitted
   concrete-record fields.
 
-The initial substituted instance is flat. The additive nested-storage profile
-also admits a fully concrete acyclic record tree such as
-`Box<Pair<Bytes, bool>>` or `Pair<Box<Bytes>, i64>`. Every reachable nominal
-node must be an authored record, every parameter is substituted by exact
-owner-and-index before examining descendants, and the final leaves remain only
-direct `Bytes` or the admitted Copy scalars. One global worklist enforces the
-existing nested-record bounds of 64 record levels, 256 owned leaves, and 4,096
-visited fields; recursive classifier calls may not reset any bound.
+The first substituted instance is flat. Nested storage also admits concrete
+acyclic trees such as `Box<Pair<Bytes, bool>>`. Every nominal is authored,
+parameters substitute by exact owner/index before descent, and leaves remain
+Bytes or admitted Copy scalars. One global worklist enforces 64 levels, 256
+owned leaves, and 4,096 fields; recursion cannot reset a bound.
 
 The additive owning generic-function relay is narrower than general nested
 generic composition. It admits exactly one `own` parameter whose type is
@@ -97,13 +93,11 @@ hostility evidence mutates authenticated HIR and backend facts rather than
 claiming a complete negative-source boundary.
 
 Nonconcrete arguments, `String`, arrays, slices, classes, variants, resources,
-unbounded or cyclic nesting, direct Project exports of generic records, FFI,
-Components, and public aggregate ABIs remain closed. One exact cross-file
-Project may execute an internal concrete generic record behind its unchanged
-scalar-only Project-v8 descriptor and package boundary. `Option<Bytes>` and the
-separately admitted one-owned-side `Result` profiles keep their compiler-owned rules;
-The record profile does not authorize prelude carriers; the exact
-`Result<Bytes, Bytes>` instance is admitted separately by
+cycles, direct generic-record exports, FFI, Components, and public aggregate
+ABIs remain closed. One cross-file Project may execute an internal instance
+behind its unchanged scalar-only v8 boundary. `Option<Bytes>` and one-owned-side
+`Result` keep compiler-owned rules; this profile does not authorize prelude
+carriers. `Result<Bytes, Bytes>` is admitted separately by
 [Owned Byte Variant Algebra v1](OWNED-BYTE-VARIANT-ALGEBRA-V1.md).
 
 Closed generic-argument shapes retain the existing `SPX-T223` or `SPX-T268`

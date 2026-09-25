@@ -1,5 +1,7 @@
 # Public Generic Compatibility v1
 
+In plain terms: this states when two generic projections are compatible.
+
 Status: implemented bounded projection, hosted green on Linux, macOS, and
 Windows; gate PG-3 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).
@@ -19,16 +21,14 @@ Two artifacts, both read-only projections of already-checked HIR:
 | Compatibility comparison | `semaprax.public-generic-compatibility.v1` |
 | Type spelling | [Public Generic Type Grammar v1](PUBLIC-GENERIC-TYPE-GRAMMAR-V1.md) |
 
-A **candidate surface** describes selected exports of one checked program: for
-each, its declared effects, its ordered parameter positions with ownership
-modes, its result, and every record instance reachable from those signatures.
-A **comparison** classifies one ordered pair of surfaces.
+A **candidate surface** records selected exports from one checked program:
+effects, ordered owned/borrowed parameter positions, result, and reachable
+record instances. A **comparison** classifies one ordered pair of surfaces.
 
-Selection is by persistent declaration identity, never by display name.
-Between 1 and 64 unique identities are accepted. An unknown identity, a
-repeated one, a type declaration, and a generic template all fail closed with
-`SPX-PG201`: a public surface names no type parameters, so describing one
-instantiation of a template would be an invention rather than a description.
+Selection uses persistent declaration identity, never a display name. It admits
+1..=64 unique function identities. Unknown, repeated, type, and generic-template
+identities fail closed with `SPX-PG201`; naming one template instance would invent
+a surface instead of describing checked facts.
 
 ## Signature positions
 

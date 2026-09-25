@@ -11,22 +11,13 @@
 
 ## Summary
 
-This RFC specifies a small, deterministic, pure data-parallel kernel profile:
-a closed admitted grammar (kernel-safe scalar/vector/buffer types, an
-explicit device-effect vocabulary, affine host/device ownership transfer,
-bounded workgroups and grids) and a closed refusal vocabulary
-(`SPX-GC001`-`SPX-GC013`) that keeps the profile's determinism promise by
-naming exactly which operations, reduction orderings, and numeric behaviors
-it refuses, and why. It is a design deliverable, not an implementation: no
-GPU is available on any host this repository builds on, and none is assumed.
-The one thing this RFC makes executable today is the admission predicate
-itself — [`src/compute_profile/classifier.rs`](../src/compute_profile/classifier.rs)
-classifies constructed fixture kernels exactly the way
-[`src/public_generic_abi/classifier.rs`](../src/public_generic_abi/classifier.rs)
-classifies constructed fixture exports for [Public Generic Boundary Profile
-v1](PUBLIC-GENERIC-BOUNDARY-PROFILE-V1.md) — so every refusal reason below is
-independently observed by a real, offline test, without pretending any
-kernel has ever compiled, dispatched, or run.
+This RFC specifies a small deterministic data-parallel profile: a closed
+grammar for kernel-safe types, device effects, affine transfer, and bounded
+workgroups/grids, plus refusal codes `SPX-GC001`-`SPX-GC013`. It is a design,
+not a GPU implementation. Today only the admission predicate is executable:
+[`src/compute_profile/classifier.rs`](../src/compute_profile/classifier.rs)
+classifies fixture kernels, so offline tests observe every refusal without
+claiming a kernel compiled, dispatched, or ran.
 
 ## Why "deterministic" is the load-bearing word
 
@@ -70,7 +61,7 @@ Out of scope for v1, matching the owning issue's own non-goals exactly:
   device effect names an explicit capability, see [Ownership and
   effects](#ownership-and-effects);
 - any claim of bit-exact floating-point equivalence where a real platform
-  does not provide one — see [Numeric policy](#numeric-policy): v1 admits no
+  does not provide one — see [Numeric policy](#numeric-policy-exact-integers-only-in-v1): v1 admits no
   floating-point kernel at all, precisely to avoid ever needing this claim
   before a dedicated tolerance profile exists;
 - accelerator syntax landing before host ownership, arrays/collections,

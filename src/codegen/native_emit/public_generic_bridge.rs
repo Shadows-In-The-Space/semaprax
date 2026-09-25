@@ -1,4 +1,4 @@
-//! Compiler-owned bridge for the private authenticated native identity profile.
+//! Compiler-owned bridges for private authenticated native identity/moves profiles.
 //! No body is inferred from a descriptor: replay the selected checked HIR, then
 //! use the ordinary native emitter and its own symbols and aggregate layout.
 
@@ -7,11 +7,72 @@ use crate::public_generic_abi::descriptor::verify::{
     verify_public_generic_descriptor, VerificationOptions, VerifiedPublicGenericDescriptor,
 };
 
+mod allocating;
+pub(crate) use allocating::emit_public_generic_allocating_bridge;
+
 pub(crate) fn emit_public_generic_identity_bridge(
     program: &ResolvedProgram,
     revision: &str,
     descriptor: &VerifiedPublicGenericDescriptor,
 ) -> Result<(String, String), Diagnostic> {
+    emit_bridge(program, revision, descriptor, false)
+}
+
+pub(crate) fn emit_public_generic_moves_bridge(
+    program: &ResolvedProgram,
+    revision: &str,
+    descriptor: &VerifiedPublicGenericDescriptor,
+) -> Result<(String, String), Diagnostic> {
+    emit_bridge(program, revision, descriptor, true)
+}
+
+// This is admission, not evaluation or an ownership checker. HIR validation
+// supplies the move/cleanup proof, and the ordinary emitter executes the body.
+// In particular, fresh records are allowed; fresh Bytes are not: their runtime
+// allocator aborts on failure and cannot settle through this private bridge.
+fn movement_body(expression: &ResolvedExpr, roots: &BTreeSet<ValueId>) -> bool {
+    match &expression.kind {
+        ResolvedExprKind::Place(place) => roots.contains(&place.root),
+        ResolvedExprKind::ConstructRecord { fields, .. } => fields
+            .iter()
+            .all(|field| movement_body(&field.value, roots)),
+        ResolvedExprKind::Block { statements, tail } => {
+            let mut locals = roots.clone();
+            for statement in statements {
+                let hir::ResolvedStatement::Let {
+                    mutable: false,
+                    binding,
+                    value,
+                    ..
+                } = statement
+                else {
+                    return false;
+                };
+                if !movement_body(value, &locals) || !locals.insert(binding.id.clone()) {
+                    return false;
+                }
+            }
+            movement_body(tail, &locals)
+        }
+        ResolvedExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            matches!(condition.kind, ResolvedExprKind::Bool(_))
+                && movement_body(then_branch, roots)
+                && movement_body(else_branch, roots)
+        }
+        _ => false,
+    }
+}
+
+fn admit<'a>(
+    program: &'a ResolvedProgram,
+    revision: &str,
+    descriptor: &VerifiedPublicGenericDescriptor,
+    moves: bool,
+) -> Result<&'a ResolvedFunction, Diagnostic> {
     hir::validate(program)?;
     verify_public_generic_descriptor(
         program,
@@ -38,20 +99,42 @@ pub(crate) fn emit_public_generic_identity_bridge(
         || input.instance_digest != descriptor.result_facts().instance_digest
         || input.fields.is_empty()
         || input.fields.iter().any(|field| field.term != "bytes")
-        || !matches!(&body.kind, ResolvedExprKind::Place(place)
-            if place.root == function.params[0].id && place.projections.is_empty())
+        || !(if moves {
+            movement_body(
+                &function.body,
+                &BTreeSet::from([function.params[0].id.clone()]),
+            )
+        } else {
+            matches!(&body.kind, ResolvedExprKind::Place(place)
+                if place.root == function.params[0].id && place.projections.is_empty())
+        })
         || function
             .requires
             .iter()
             .chain(&function.ensures)
             .any(|guard| !matches!(guard.kind, ResolvedExprKind::Bool(_)))
     {
-        return Err(backend_error("authenticated-native-identity.v1 requires a flat Bytes identity body and literal boolean contracts"));
+        return Err(backend_error(if moves {
+            "authenticated-native-moves.v1 requires a flat Bytes movement body and literal boolean contracts"
+        } else {
+            "authenticated-native-identity.v1 requires a flat Bytes identity body and literal boolean contracts"
+        }));
     }
+    Ok(function)
+}
+
+fn emit_bridge(
+    program: &ResolvedProgram,
+    revision: &str,
+    descriptor: &VerifiedPublicGenericDescriptor,
+    moves: bool,
+) -> Result<(String, String), Diagnostic> {
+    let function = admit(program, revision, descriptor, moves)?;
     let functions = function_index(program)?;
     let symbol = &functions[&FunctionExecutionId::Monomorphic(function.id.clone())].symbol;
     let record = c_record_symbol(&function.params[0].ty);
-    let fields: Vec<_> = input
+    let fields: Vec<_> = descriptor
+        .input_facts()
         .fields
         .iter()
         .map(|field| c_field_symbol(&DeclarationId::new(&field.id)))
@@ -67,9 +150,14 @@ pub(crate) fn emit_public_generic_identity_bridge(
             None
         )?
     );
+    let endpoint = if moves {
+        "spx_pg_endpoint_checked_moves_v1"
+    } else {
+        "spx_pg_endpoint_checked_identity_v1"
+    };
     let mut bridge = format!(
         r#"
-static spx_pg_status_v1 spx_pg_endpoint_checked_identity_v1(uint32_t leaf_count,
+static spx_pg_status_v1 {endpoint}(uint32_t leaf_count,
     uint8_t *const *input_leaf_bytes, const size_t *input_leaf_lens,
     uint8_t **out_leaf_bytes, size_t *out_leaf_lens) {{
     if (leaf_count != {}u) return SPX_PG_STATUS_MALFORMED_CARRIER;

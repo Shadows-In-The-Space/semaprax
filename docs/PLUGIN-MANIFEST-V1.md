@@ -4,16 +4,14 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax plugin-manifest <file.spx>` is a deterministic, read-only
-projection that derives one canonical digest-authenticated envelope
-(`semaprax.plugin-manifest.v1`) describing a capability-limited plugin
-descriptor for one verified module. It is the first executable slice of the
-completion-matrix row "Plugins" under Application platforms. It performs no
-Component Model runtime or packaging, no host loading or lifecycle
-management, no versioning negotiation, no resource-limit enforcement, and no
-hostile-plugin execution testing; it compiles nothing beyond the production
-native projection used for verbatim signatures, executes nothing, and
-changes no source.
+`semaprax plugin-manifest <file.spx>` describes one verified module as a
+canonical digest-authenticated `semaprax.plugin-manifest.v1` envelope with a
+capability-limited plugin descriptor. This deterministic read-only command is
+the first executable slice of the matrix's Application-platform "Plugins" row.
+It adds no Component Model runtime or package, host loading or lifecycle,
+version negotiation, resource enforcement, or hostile-plugin execution test.
+It compiles nothing beyond the production native projection used for verbatim
+signatures, executes nothing, and changes no source.
 
 ## Command
 

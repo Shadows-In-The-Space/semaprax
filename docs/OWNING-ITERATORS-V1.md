@@ -7,9 +7,9 @@ cross-engine runtime, projection, and ProgramRoot replay corpus.
 Audience: language users, compiler contributors, backend implementers, and
 workspace-service authors.
 
-This LANG-07 profile introduces a first-class consuming iterator protocol over
-bounded scalar vectors. It is the ownership foundation for separately implemented
-iterator loops and adapters, not an eager vector transformation.
+LANG-07 adds a consuming iterator protocol for bounded scalar vectors. It
+underpins separate iterator loops and adapters; it does not eagerly transform
+the vector.
 Owning `Bytes` payload traversal is the additive
 [Owning Iterator Payloads v2](OWNING-ITERATOR-PAYLOADS-V2.md) profile.
 

@@ -6,12 +6,11 @@ Status: implemented bounded read-only profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). The full graph-operational
 programme remains Partial.
 
-An immutable `ProjectSemanticImage` can return a compact function summary and
-expand revision-bound facets without reading source paths, parsing source
-text, adding graph-only meaning, or granting source/publication authority.
-Image v1 serialized bytes, its digest, and existing Graph/Context/Impact
-schemas remain unchanged. These queries inspect the already validated
-per-module HIR retained by the image's `ProjectRevision`.
+Ask an immutable `ProjectSemanticImage` for one short function summary, then
+expand only the facets you need. The queries use already validated HIR: they
+do not read source paths, parse source text, add graph-only meaning, or grant
+source/publication authority. Image v1 bytes and digest and existing
+Graph/Context/Impact schemas remain unchanged.
 
 ## API and selection
 

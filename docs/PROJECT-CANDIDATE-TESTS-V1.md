@@ -8,12 +8,12 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-This additive library route distinguishes a static affected-test plan from an
-explicit request to execute the complete manifest-declared test closure. It
-uses the existing [Project execution](PROJECT-MANIFEST-V1.md) interpreter,
-with no new filesystem, process, target, network, trace, or publication
-authority. Existing candidate construction, image serialization, and legacy
-Project execution bytes are unchanged.
+This library route separates planning affected tests from explicitly running
+the complete manifest-declared test closure. It uses the existing
+[Project execution](PROJECT-MANIFEST-V1.md) interpreter without adding
+filesystem, process, target, network, trace, or publication authority. Candidate
+construction, image serialization and legacy Project execution bytes stay
+unchanged.
 
 ## Library API
 
@@ -41,9 +41,9 @@ host's options. Getters disclose `max_steps`, `max_execution_bytes`, and
 | Call depth | Existing fixed interpreter ceiling, 256 |
 | Trace events/bytes | Zero; trace is disabled and not produced |
 
-These are independent limits. Fuel bounds interpreter evaluation, not the
-preceding source replay or artifact admission work. Existing source, candidate,
-and Project bounds still apply. Report size is not a bound on total HIR memory.
+These limits apply independently. Fuel limits interpreter evaluation, not the
+source replay or artifact admission that comes first. Source, candidate and
+Project bounds still apply. A report-size limit does not bound total HIR memory.
 
 `CandidateTestReport::to_json()` returns canonical report bytes with one
 terminal LF. `report_digest()` binds every exact report byte. `execution()`

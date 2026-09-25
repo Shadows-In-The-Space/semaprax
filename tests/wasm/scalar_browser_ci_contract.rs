@@ -107,8 +107,8 @@ fn browser_known_answers_match_authenticated_baseline_and_rename_graphs() {
                 assert_only_checked_value_cursor_budget_changed(
                     revision.semantic_graph(),
                     [
-                        "sha256:0d58886eabc7f7b2d41565919a7150f49450ead2d23810d14583b300fcc5bf22",
-                        "sha256:160bae5e08f03ac6dee10b4b47687c13dcd38fd142625941725432e668653491",
+                        "sha256:d87be62a692aeb1fd06e25bcf48cd2c202a72119a67d8460a815aee309c1ff91",
+                        "sha256:2a15e8da3c98284682190ee50d8f65c596b8b1f20e4b8840c274124c485903e8",
                     ][index],
                 );
                 let actual = [

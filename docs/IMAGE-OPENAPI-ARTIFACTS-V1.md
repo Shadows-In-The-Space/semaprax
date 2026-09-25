@@ -8,10 +8,10 @@ separately gated.
 
 Audience: compiler contributors, semantic agent clients and embedding hosts.
 
-OpenAPI joins Web and npm as an image artifact kind. Agents can inspect actual
+OpenAPI is an image artifact kind alongside Web and npm. Agents can inspect
 generated document bindings and compare a candidate with its original source
-revision without running a server, writing output files or granting publication
-authority. Canonical `.spx` source remains the only program authority.
+revision without starting a server, writing output files, or gaining publication
+authority. Canonical `.spx` source remains the program authority.
 
 ## Selection and source meaning
 

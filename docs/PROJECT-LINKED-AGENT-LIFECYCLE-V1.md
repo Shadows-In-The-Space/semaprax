@@ -8,10 +8,10 @@ The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
 local-only evidence status. Private composition and broader lifecycle support
 remain distinct from release evidence.
 
-This profile binds the typed iterative Agent runtime to an authenticated Project
-role closure. It lets the runtime consume deterministic Agent roles retained by
-the Project dependency closure while preserving the existing direct binder and
-all older Runtime, Definition, and lifecycle bytes.
+This profile binds the typed iterative Agent runtime to an authenticated
+Project role closure. The runtime can use deterministic Agent roles retained
+by the Project dependency closure. The direct binder and all older Runtime,
+Definition and lifecycle bytes stay unchanged.
 
 ## Authenticated Project role closure
 
@@ -20,8 +20,8 @@ stable Agent identity, derives its Definition from the ordinary checked source,
 and compares that canonical Definition with a retained Project AgentDefinition.
 It replays the complete retained source set through the ordinary bounded
 semantic-workspace preflight and requires the replayed manifest and workspace
-revision to equal the retained Project. The resulting linked program is an
-internal role closure, not an exported owned signature.
+revision to equal the retained Project. The linked program is an internal role closure; it is not an exported owned
+signature.
 
 The closure retains the four deterministic roles `initialize`, `observe`,
 `authorize`, and `reduce`. Each role must be present in the checked closure and

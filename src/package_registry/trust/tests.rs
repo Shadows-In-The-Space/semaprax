@@ -2,6 +2,146 @@ use super::*;
 use ed25519_dalek::{Signer, SigningKey};
 use std::sync::OnceLock;
 
+pub(super) fn host_v3_migration_fixture() -> (
+    String,
+    String,
+    String,
+    [String; 2],
+    String,
+    ManifestBoundEntry,
+) {
+    let mut root = root_value(1, 1, 4, 2);
+    root["roles"][3]["name"] = json!("publisher-app");
+    for seed in [6, 7] {
+        let key = key(seed);
+        root["keys"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"keyid":keyid(&key),"public":encoded(&key.verifying_key().to_bytes())}));
+    }
+    root["roles"].as_array_mut().unwrap().push(json!({"name":"publisher-lib","namespace":"lib.","keyids":[keyid(&key(6)),keyid(&key(7))],"threshold":2}));
+    let root_bytes = wire(&root);
+    let root = InstalledRoot::from_independently_installed_bytes(&root_bytes).unwrap();
+    let entry = admitted().0.clone();
+    let registry = super::super::registry_v2::build_snapshot(std::slice::from_ref(&entry))
+        .unwrap()
+        .envelope()
+        .to_owned();
+    let publishers = [
+        metadata(
+            &root,
+            "publisher-app",
+            1,
+            500,
+            json!({"targets":[{"package":entry.publication().package,"version":entry.publication().version,"manifest":blob(entry.artifact_manifest_bytes().as_bytes())}]}),
+            &[key(4), key(5)],
+        ),
+        metadata(
+            &root,
+            "publisher-lib",
+            1,
+            500,
+            json!({"targets":[]}),
+            &[key(6), key(7)],
+        ),
+    ];
+    let snapshot = metadata(
+        &root,
+        "snapshot",
+        1,
+        400,
+        json!({"registry":blob(registry.as_bytes()),"publishers":[
+        {"role":"publisher-app","metadata":metadata_ref(&publishers[0])},{"role":"publisher-lib","metadata":metadata_ref(&publishers[1])}]}),
+        &[key(3)],
+    );
+    let timestamp = metadata(
+        &root,
+        "timestamp",
+        1,
+        300,
+        json!({"snapshot":metadata_ref(&snapshot)}),
+        &[key(2)],
+    );
+    (root_bytes, timestamp, snapshot, publishers, registry, entry)
+}
+
+// Test-only signed bytes and independently replayed admission for the physical
+// host regressions. No signing constructor is exposed by production modules.
+pub(super) fn host_fixture(
+    yanked: bool,
+) -> (String, String, String, String, String, ManifestBoundEntry) {
+    let fixture = if yanked {
+        Fixture::with_entry(
+            super::super::registry_v2::tests::real_admitted_fixture_with_status(
+                super::super::PublicationStatus::Yanked {
+                    reason: "host regression yank".to_owned(),
+                },
+            )
+            .0,
+        )
+    } else {
+        Fixture::new()
+    };
+    (
+        wire(&root_value(1, 1, 4, 2)),
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+    )
+}
+
+pub(super) fn host_artifact_fixture() -> (
+    String,
+    String,
+    String,
+    String,
+    String,
+    ManifestBoundEntry,
+    Vec<u8>,
+) {
+    let fixture = Fixture::new();
+    (
+        wire(&root_value(1, 1, 4, 2)),
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+        admitted().1.module_wasm.clone(),
+    )
+}
+
+pub(super) fn host_rotation_fixture() -> (String, String, String, String, String, ManifestBoundEntry)
+{
+    let mut fixture = Fixture::new();
+    let next = root_value(2, 10, 20, 2);
+    let rotation = sign(
+        next.clone(),
+        &[key(1), key(10)],
+        b"semaprax.registry-trust-root.v1\0",
+    );
+    fixture.root = InstalledRoot::from_independently_installed_bytes(&wire(&next)).unwrap();
+    let mut publisher: Value = serde_json::from_str(&fixture.publisher).unwrap();
+    publisher["signed"]["root_digest"] = json!(fixture.root.digest);
+    publisher["signed"]["version"] = json!(2);
+    fixture.publisher = sign(
+        publisher["signed"].clone(),
+        &[key(20), key(21)],
+        SIGN_DOMAIN,
+    );
+    fixture.refresh(2, 2);
+    (
+        rotation,
+        fixture.timestamp,
+        fixture.snapshot,
+        fixture.publisher,
+        fixture.registry,
+        fixture.entry,
+    )
+}
+
 fn key(seed: u8) -> SigningKey {
     SigningKey::from_bytes(&[seed; 32])
 }

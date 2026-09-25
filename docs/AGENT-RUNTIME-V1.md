@@ -2,10 +2,15 @@
 
 Audience: maintainers, host integrators, and compiler contributors.
 
-Status: the A+B private proof and additive C1 injected-host Rust API were hosted
-green at the recorded revision below. The newer remaining-deadline and accounting-receipt
-additions have local targeted evidence only; hosted revalidation is pending. It does not add language syntax, compiler semantics, a provider transport, a CLI, or a
-backend.
+This bounded native runtime accepts an authenticated profile and task, then
+calls only explicitly injected model and read-only tool hosts. Model output is
+data, never permission to run a tool.
+
+Status: the A+B private proof and additive C1 injected-host Rust API were
+hosted green at the recorded revision below. Newer deadline and accounting
+receipt additions have local targeted evidence only; hosted revalidation is
+pending. This adds no language syntax, compiler semantics, provider transport,
+CLI, or backend.
 
 ## Boundary
 

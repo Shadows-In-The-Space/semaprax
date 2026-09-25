@@ -15,11 +15,11 @@ capability boundary, and zero-authority behavior.
 
 ## Bounded suggestion rule
 
-When top-level dispatch or `semaprax help <command>` receives an unknown ASCII
-command name of at most 64 bytes, the CLI compares it only with command names
-and aliases already visible in that executable's static catalog. A unique
-nearest name is suggested when its bytewise Levenshtein edit distance is at
-most one for inputs up to four bytes and at most two for longer inputs.
+For an unknown ASCII command of at most 64 bytes, top-level dispatch and
+`semaprax help <command>` compare only names and aliases visible in that
+executable's static catalog. The CLI suggests a unique nearest name using
+bytewise Levenshtein edit distance: at most one edit for inputs up to four
+bytes, or two edits for longer inputs.
 
 The exact diagnostic becomes:
 
@@ -28,12 +28,11 @@ unknown command `chek`; did you mean `check`?
 ```
 
 It retains the v1 trailing blank line, status 2, capability-appropriate global
-help on stdout, and empty working-directory behavior. A tie, a more distant
-name, non-ASCII input, or input longer than 64 bytes keeps the exact v1
-`unknown command` diagnostic without a suggestion.
+help on stdout, and empty working-directory behavior. Ties, names beyond the distance limit, non-ASCII input and inputs over 64 bytes
+keep the exact v1 `unknown command` diagnostic, without a suggestion.
 
-Suggestions never inspect source, paths, the environment, installed tools,
-plugins, targets, or network state. The standalone compiler cannot suggest
+Suggestions use the static catalog only. They never inspect source, paths,
+the environment, installed tools, plugins, targets, or network state. The standalone compiler cannot suggest
 `doctor`, `new`, or another private-only entry because those names are absent
 from its visible catalog. The full toolchain may suggest them because it
 already exposes them in global help.

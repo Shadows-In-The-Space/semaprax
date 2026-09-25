@@ -114,9 +114,10 @@ fn cases(descriptor: &VerifiedPublicGenericDescriptor, source: &str) -> Vec<Case
                     (14, "SPX-PG803")
                 };
                 super::super::remint(&mut changed);
-                let error = parse_bounded(&changed)
-                    .and_then(|frame| plan.validate_frame(&frame))
-                    .unwrap_err();
+                let error = match parse_bounded(&changed) {
+                    Ok(frame) => plan.validate_frame(&frame).unwrap_err(),
+                    Err(error) => error,
+                };
                 assert_eq!(error.code, code);
                 // The production encoder rebuilds the payload-bearing frame and
                 // remints its digest; the injected metadata is not a fake codec.
@@ -147,7 +148,7 @@ fn cases(descriptor: &VerifiedPublicGenericDescriptor, source: &str) -> Vec<Case
     output
 }
 
-fn run(root: &Path, cxx: bool, opt: &str, expected: i32) {
+pub(super) fn run(root: &Path, cxx: bool, opt: &str, expected: i32) {
     let clang = env::var_os("CLANG").unwrap_or_else(|| "clang".into());
     let executable = root.join(format!("probe{opt}{}", env::consts::EXE_SUFFIX));
     let assert_compiled = |command: &mut Command| {

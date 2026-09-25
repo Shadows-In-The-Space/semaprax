@@ -10,10 +10,10 @@ exact Project candidate against an explicit package corpus.
 The existing [Package Semantic Graph v1](PACKAGE-SEMANTIC-GRAPH-V1.md)
 authenticates coordinate-qualified imports and cross-package source call sites
 from a complete offline source capsule. Candidate Package Consumer Replay
-rebuilds that graph from caller-supplied candidate-era evidence and accepts it
-only when the selected provider source is byte-for-byte the exact canonical
-source in the final candidate. It does not scan a registry, installation,
-workspace, deployment or filesystem consumer tree.
+rebuilds that graph from caller-supplied candidate-era evidence. It accepts the
+graph only if the selected provider source exactly matches the final
+candidate's canonical source bytes. It does not scan registries, installations,
+workspaces, deployments or filesystem consumer trees.
 
 ## Library API and authentication
 
@@ -46,9 +46,8 @@ source must equal the final candidate source.
 The method then independently derives `PackageSemanticGraph` through the
 ordinary resolver, selected subjects, reports, implementation sources and
 source-capsule replay. The provider report and capsule are therefore
-candidate-era evidence. A baseline report paired with changed candidate source,
-or a source carrying the same stable ID under another coordinate, cannot create
-an association.
+candidate-era evidence. Pairing a baseline report with changed candidate source cannot establish an
+association. Neither can source with the same stable ID under another coordinate.
 
 The graph's provider source and interface-source revisions must equal the
 candidate Project source revision. Its package-domain source digest is

@@ -7,10 +7,10 @@ have historical local witnesses. Public generic ABI and support remain separate.
 
 Audience: compiler contributors, reviewers, and agent authors.
 
-This profile composes [Owning Iterators v1](OWNING-ITERATORS-V1.md) with
-[Generic Compiler Collections v1](GENERIC-COMPILER-COLLECTIONS-V1.md) and
-[Generic Closures v2](CLOSURES-V2.md). It admits private effect-free generic
-helpers over the existing consuming iterator protocol.
+Private effect-free generic helpers may use the existing consuming iterator
+protocol. This combines [Owning Iterators v1](OWNING-ITERATORS-V1.md),
+[Generic Compiler Collections v1](GENERIC-COMPILER-COLLECTIONS-V1.md), and
+[Generic Closures v2](CLOSURES-V2.md).
 
 ## Checked signatures and bodies
 

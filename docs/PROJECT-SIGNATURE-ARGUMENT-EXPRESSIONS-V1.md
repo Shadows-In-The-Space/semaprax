@@ -29,8 +29,8 @@ alternative for a fresh scalar or checked Copy nominal parameter:
 }
 ```
 
-The object is closed to `name`, `type`, and `argument_expression`. Scalar types
-are `i64`, `i32`, `u8`, `usize`, or `bool`. The expression uses the existing typed
+Only `name`, `type`, and `argument_expression` are accepted. Scalar types are
+`i64`, `i32`, `u8`, `usize`, or `bool`. Expressions use the existing typed
 constructor grammar, including scoped bindings and admitted aggregate operands.
 It is mutually exclusive with literal `argument` and retained `from` mappings.
 The old literal and `append_parameters` routes retain their existing rules and
@@ -64,8 +64,8 @@ Every affected caller independently resolves the selected type through its own
 existing binding. Its generated local uses that binding, including a different
 import alias from the provider. No type import is added. Generic source-type
 imports remain closed under ordinary Project admission; local generic and
-prelude types keep their existing rules. An unbound caller rejects the complete
-candidate, even if the expression itself could infer a type without annotation.
+prelude types keep their existing rules. A caller without the required binding causes the whole candidate to be
+rejected, even if the expression could infer a type without an annotation.
 
 ## Scope and caller migration
 

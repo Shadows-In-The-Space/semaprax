@@ -1,5 +1,7 @@
 # Public Generic Boundary Profile v1
 
+In plain terms: this is the fixed test for what may cross the generic boundary.
+
 Audience: compiler contributors implementing the admission classifier, and reviewers of the generic boundary scope.
 
 Status: frozen predicate and bounds table, now implemented by a pure
@@ -20,11 +22,9 @@ implementer of issue #150 and every issue downstream of it.
 
 ## Why this document exists
 
-Three overlapping issue packs describe the same callable public generic
-boundary at different levels of detail: the original design issue (#132), the
-granular implementation spine (#149-#166), and the descriptor/carrier pair
-(#170-#171). Read together rather than singly, they disagree on how wide the
-admitted shape is:
+Three issue packs describe this boundary at different levels: design (#132),
+implementation (#149-#166), and descriptor/carrier work (#170-#171). Their
+scope wording conflicts:
 
 - #132's own "Bounded scope" section proposes "one nonrecursive owned record
   with one `Bytes` leaf and admitted Copy fields" as the experimental
@@ -190,10 +190,9 @@ leaf, leaf-count, or per-carrier payload admission bound above.
 
 Where several existing bounds could apply and differ, the smaller one was
 chosen; none of the numbers above widen any bound an existing hosted-green
-specification already enforces. Exact `limit` and `limit + 1` cases are
-required test fixtures for the future classifier (§ [Required test
-matrix](#required-test-matrix-for-the-classifier)); this document does not
-claim they exist yet, because the classifier does not exist yet.
+specification already enforces. Exact `limit` and `limit + 1` cases belong in
+the classifier test matrix; [Evidence](#evidence) records local coverage and
+does not claim a hosted run.
 
 ## IN / DEFERRED / EXCLUDED shape table
 

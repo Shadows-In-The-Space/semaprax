@@ -13,9 +13,9 @@ item on issue #61.
 
 ## The gap this closes
 
-[Doctor signed install v1](DOCTOR-SIGNED-INSTALL-V1.md) turns one
-independently authenticated release into an immutable local generation and
-lets a caller `activate`/`rollback`/`inspect_active` it. Its nine release
+[Doctor signed install v1](DOCTOR-SIGNED-INSTALL-V1.md) stores one
+authenticated release as an immutable generation. A caller can
+`activate`, `rollback`, or `inspect_active` it. Its nine release
 members (`request`, `bundle`, `launcher`, `worker`, `collector`,
 `provisioner`, the signed capsule, the release manifest, and the manifest
 signature — see `crates/semaprax-doctor-release/src/directory.rs`) sit as

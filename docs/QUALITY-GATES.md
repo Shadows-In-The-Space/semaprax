@@ -4,28 +4,25 @@ Status: living internal contributor documentation.
 
 Audience: contributors, maintainers, and release reviewers.
 
-This document defines repository-wide verification policy and routes changes to
-their owning evidence. Exact protocol mutation matrices, known-answer digests,
-platform fixtures, and focused command lists belong in the relevant versioned
-specification and tests; they are not repeated here.
+Use this page to choose the repository-wide verification profile. Each
+versioned specification owns its focused tests, fixtures, and known answers.
 
-The implemented v0.4.0 regression corpus has the
-[HOSTED GREEN release baseline](RELEASE-0.4.0-STATUS.md). The tables below
-state checks to preserve or rerun for future changes; they are not a backlog
-of first executions for released implementations. Explicitly ignored, provisioned
-or broader-target gates retain their stated selection requirements.
+The v0.4.0 regression corpus has a
+[HOSTED GREEN baseline](RELEASE-0.4.0-STATUS.md). These checks preserve that
+evidence for later changes; ignored or provisioned tests run only when
+explicitly selected.
 
 ## The rule
 
-A change is ready only when:
+A change is ready when:
 
 1. its baseline quality profile passes;
 2. every affected versioned contract passes its focused evidence;
 3. preservation tests for older schemas and unaffected behavior pass;
 4. any public or hosted claim has evidence from the exact commit being claimed.
 
-A local green test can support a local claim. It cannot be promoted to hosted,
-public, cross-platform, or production evidence without the corresponding gate.
+A local pass proves only a local result. Hosted, public, cross-platform, and
+production claims need their own exact-commit evidence.
 
 Native public-generic single-owner/admission changes additionally run the
 [admission continuation](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-single-owner-admission-continuation-issue-162):
@@ -65,35 +62,26 @@ has executed.
 
 ## Standard entry point
 
-Use the routed script on Unix:
+On Unix, the standard full profile is:
 
 ```sh
 scripts/quality.sh full
 ```
 
-It accepts `quick`, `changed`, or `full`. The script first emits and validates a
-deterministic `semaprax.quality-route.v2` plan, then dispatches only the exact
-listed gates. `changed` may widen to `full` when the path classification is not
-safe enough for a narrower run. Two path classes stay narrow and append their
-own gate after the fixed `changed` list: CLI surface paths (`src/cli/`,
-`src/cli_driver/`, `src/bin/`, `src/cli_driver.rs`, `src/main.rs`) add
-`test-cli`, which runs the CLI harnesses of both the standalone package and the
-full toolchain; editor
-paths (`editors/`) add `test-editor`, which runs the extension's `node --test`
-suite and the documentation harness. Any other unmapped path still widens the
-whole run to `full`, and `full`'s gate list does not vary.
+The script accepts `quick`, `changed`, or `full`. It validates a deterministic
+`semaprax.quality-route.v2` plan before running gates. `changed` widens to
+`full` when a path lacks a safe narrow mapping. CLI paths add `test-cli` for
+standalone and full-toolchain harnesses; editor paths add `test-editor` for
+extension and documentation tests. The `full` gate list is fixed.
 
-Preview the validated route without running any gates when choosing a local
-feedback loop or diagnosing why `changed` widened:
+Preview the route without running tests:
 
 ```sh
 scripts/quality.sh changed --plan
 ```
 
-Run `scripts/quality.sh --help` for the profile and option summary. During
-execution the script writes each gate name to standard error before starting
-it, so long-running checks remain attributable without changing the canonical
-plan on standard output.
+Use `scripts/quality.sh --help` for options. During a run, each gate name goes
+to stderr before it starts.
 
 | Profile | Intended use | Gates |
 | --- | --- | --- |
@@ -117,18 +105,18 @@ Human diagnostic rendering requires exact path/span combinations,
 control-character escaping, unchanged JSON, and a physical compiler failure as
 owned by [Human Diagnostic Locations v1](HUMAN-DIAGNOSTICS-V1.md).
 
-The script is the executable source of truth for the precise command sequence.
-Do not copy that sequence into feature documents.
+The script owns the exact command sequence; do not duplicate it in feature
+documents.
 
 The general Windows CI job disables dev/test debug-symbol files and incremental
-artifacts to reduce cold-build I/O. It retains debug assertions, all existing
-tests, physical host gates, and release-profile settings; this is a build-cost
-change, not a reduction in coverage.
+artifacts to reduce cold-build I/O. It keeps debug assertions, existing tests,
+physical host gates, and release-profile settings. This saves build cost; it
+does not narrow coverage.
 
-The current-toolchain Rust lane uses the same closed four-way Cargo target
-inventory on Linux, macOS, and Windows: one lib/bin shard and three integration
-target shards run in parallel. Focused runtime tests, sanitizers, and physical
-platform gates remain in a separate blocking evidence job for each host.
+On Linux, macOS, and Windows, the current-toolchain Rust lane runs the same
+closed four-way Cargo target inventory: one lib/bin shard and three parallel
+integration-target shards. Each host keeps focused runtime tests, sanitizers,
+and physical-platform gates in a separate blocking evidence job.
 Formatting, Clippy, doctests, rustdoc, release builds, packaging, and examples
 run in the independent `verify-build` matrix, so they no longer wait for that
 evidence. Windows retains its existing exclusion of
@@ -137,40 +125,37 @@ exclusion against Cargo metadata instead of accepting a free-form omitted
 target. Unknown target kinds or package exclusions fail closed. The release
 gate requires all three matrices.
 
-The Rust 1.88 minimum-version lane partitions the complete Cargo workspace
-target inventory into a lib/bin shard and three integration-target shards using
-`scripts/ci-msrv.py`. Every shard retains workspace-wide feature unification,
-locked dependencies, and the 20-minute job limit. The unit shard alone runs the
-whole-workspace all-targets/all-features check; repeating that identical check
-in the three integration shards adds no target coverage. Matrix fail-fast is
-disabled so every shard reports its result after a peer failure. Shared integration target names stay together;
+The Rust 1.88 minimum-version lane uses `scripts/ci-msrv.py` to split the
+complete Cargo workspace inventory into one lib/bin and three integration
+shards. Every shard keeps workspace-wide feature unification, locked
+dependencies, and the workflow's 360-minute job limit. Only the unit shard
+runs the whole-workspace all-targets/all-features check; repeating it in
+integration shards would add no target coverage. Fail-fast is off so every
+shard reports after a peer failure. Shared integration target names stay together;
 unknown target kinds fail closed instead of silently losing coverage. The
 release gate requires the complete matrix. This changes scheduling only, not
 the local `full` profile or any test, admission limit, or release requirement.
 
 ## Kernel-0 Lean proof gate
 
-`proofs/kernel0-lean/Kernel0.lean` is a hole-free Lean 4 mechanization of
-Progress and Preservation for the whole Kernel-0 language, including `Let`
-and non-recursive `Call`. It also composes them into a fuel-bounded small-step
-progress theorem: within any supplied budget a closed, well-typed term reaches
-a value/fault or consumes the exact budget with a witnessed next `Step`. This
-proof also establishes the local decrease bridge: value substitution preserves
-node count and call targets, and every step either shrinks syntax or is a
-contextual beta whose introduced calls have lower rank. A supplied
+`proofs/kernel0-lean/Kernel0.lean` proves Progress and Preservation for all of
+Kernel-0, including `Let` and non-recursive `Call`, without holes. Its
+fuel-bounded small-step theorem says a closed, well-typed term either reaches a
+value/fault within the supplied budget or consumes exactly that budget with a
+witnessed next `Step`. The decrease bridge shows that value substitution
+preserves node count and call targets; each step shrinks syntax or introduces
+lower-rank calls through contextual beta. A supplied
 `WeightedCallCertificate` now yields a global natural-number potential that
 strictly decreases on every real step and a finite normalization theorem for
-closed well-typed terms. The gate does not derive weights from the ranked call
-graph or compiler HIR, and does not compute a numeric fuel bound --
+closed well-typed terms. The gate neither derives weights from the ranked call
+graph or compiler HIR nor computes a numeric fuel bound --
 see [Kernel-0 proof mechanization](KERNEL-PROOF-MECHANIZATION-V1.md) for the
-design record and [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md) for what
-Kernel-0 is. Before issue #188, nothing in the repository re-checked that
-file: no CI job ran `lake build`, it was not in `scripts/quality.sh`, and
-nothing would fail if the proof were reverted, weakened, or silently made to
-stop building.
+design record and [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md) for Kernel-0.
+Before issue #188, neither CI nor `scripts/quality.sh` re-checked this file:
+proof regression or a broken build could go undetected.
 
-`scripts/kernel0-lean-gate.py` is that executable gate, and its own module
-doc comment is the source of truth for its exact behavior. Summary:
+`scripts/kernel0-lean-gate.py` supplies that gate. Its module doc comment owns
+the exact behavior; the summary follows:
 
 - **Always runs, no Lean toolchain required**: re-locates each of the 34
   headline theorems (`progress_scalarIf`, `progress_scalarIf_closed`,
@@ -250,7 +235,7 @@ doc comment is the source of truth for its exact behavior. Summary:
 
 ## Manual baseline
 
-On a host that cannot run the POSIX script, reproduce the `full` profile:
+If a host cannot run the POSIX script, reproduce the `full` profile:
 
 ```sh
 git diff --check
@@ -264,8 +249,8 @@ cargo build --locked --workspace --release
 cargo package --locked --allow-dirty -p semaprax
 ```
 
-Also run the example check and canonical-format loops from
-`scripts/quality.sh`; keeping the list there prevents drift.
+Also run the example check and canonical-format loops in
+`scripts/quality.sh`; the script owns that list to prevent drift.
 
 ## Documentation changes
 
@@ -276,24 +261,24 @@ git diff --check
 cargo test --locked -p semaprax --test documentation --test examples
 ```
 
-`tests/documentation.rs` checks local Markdown links recursively, that every
-tour code block is a verbatim example excerpt, and that every SEMAPRAX block in
+`tests/documentation.rs` checks recursive local Markdown links, verbatim
+tour/example excerpts, and every SEMAPRAX block in
 the [agent quick reference](AGENT-QUICK-REFERENCE.md) either verifies cleanly in
 canonical form or produces exactly the diagnostic code its marker names. The
-same harness regenerates and pins the diagnostic-help JSON from the reference's
-correction table and requires every marked failing block to have indexed help.
-The
-docs workflow builds the mdBook using the pinned version in
+same harness regenerates and pins diagnostic-help JSON from the reference's
+correction table and requires indexed help for every marked failing block.
+The docs workflow builds mdBook using the pinned version in
 `.github/workflows/docs.yml`. The pinned mdBook installation is cached by
 version, runner OS, and architecture and its version is checked before use.
 Every Docs run still builds the book; only deployable main pushes upload it.
 
-If documentation changes a technical claim, run the evidence that owns that
-claim. Editing prose does not substitute for implementation evidence.
+If a document changes a technical claim, run its owning evidence. Prose alone
+does not establish implementation behavior.
 
 ## Change-specific evidence
 
-Select every row touched by the change; these categories are cumulative.
+Select every affected row. Requirements add together; one row does not replace
+another.
 
 | Change | Minimum additional evidence |
 | --- | --- |
@@ -428,13 +413,12 @@ Select every row touched by the change; these categories are cumulative.
 | Unpacked release product | Explicit native archive admission, exact inventory and manifest/version agreement, outside-checkout calculator and read-only daemon execution, stable source/package bytes, and real generated Node/Rust consumers; [release process](RELEASE-PROCESS.md) separates artifact labels, local execution and release provenance. No implicit archive build, extraction, installation or hosted promotion. |
 | Kernel-0 Lean proof (`proofs/kernel0-lean/`) | Headline-theorem presence and byte-exact pinned signatures extracted from comment/string-stripped source (deletion, renaming, statement-weakening and commented-signature spoofing fail closed, no Lean toolchain needed), one authoritative exact pin over the complete live comment/string-stripped source plus 14 narrower semantic-region pins for diagnostics, a comment/string-aware `sorry`/`admit`/`axiom`/`constant` token scan, and, where `lake` is on PATH, a `lake build` plus a gate-owned unpredictable-marker `#print axioms` audit requiring every headline theorem's axiom set to be a subset of `propext`/`Classical.choice`/`Quot.sound`. The complete-source pin makes every live command, declaration gap, and proof body review-and-repin controlled. Built-in hostile self-tests reject commented signatures, source-forged/removed reports, live `constant` declarations, an injected zero-cost `Steps.teleport`, an injected universal `FaultRedex`, and a gap-injected local notation rebinding `FaultRedex` to `True`. The build half also requires three semantic hostile controls to fail at their exact type mismatches: a recursive call cannot forge strict rank, a genuine two-step fixture cannot fit a one-step normalization budget, and its equal-size first beta cannot be forged into a strict node decrease. See "Kernel-0 Lean proof gate" below for the exact catch/skip inventory; a missing toolchain is an explicit, visible skip of the build half only, never a silent pass. |
 
-The owning specification lists exact focused tests. If it does not, add the
-missing evidence section there instead of growing this document into a second
-copy of the spec.
+The owning specification lists exact focused tests. If that list is missing,
+add it there rather than duplicating the spec here.
 
 ## Required semantic cases
 
-When runtime meaning changes, cover all applicable cases:
+For a runtime-meaning change, cover every applicable case:
 
 - minimum and maximum admitted values and capacities;
 - exact-capacity success and capacity-plus-one rejection;
@@ -466,9 +450,9 @@ builder remains unpublished until that boundary is intentionally promoted.
 
 ## Hosted evidence
 
-Hosted claims require the exact workflow jobs named by the owning
-specification. A prior-head run is historical evidence only. A diagnostic or
-allowed-failure job is not a passing promotion gate.
+For a hosted claim, use the exact workflow jobs named by the owning
+specification. A prior-head run is historical evidence; diagnostic and
+allowed-failure jobs do not pass a promotion gate.
 
 A cancelled run is neither. The `Release gate` job aggregates every CI blocker
 and fails, rather than skipping, when any of them failed, was skipped, was
@@ -492,7 +476,7 @@ Either tag run promotes release evidence only where an owning gate selects it;
 it does not turn ignored, unprovisioned, multi-engine, physical-device,
 registry, or production-support requirements into passing evidence.
 
-For platform claims:
+For platform claims, keep these boundaries explicit:
 
 - compilation or object inspection is not runtime execution;
 - simulator evidence is not physical-device evidence;
@@ -501,8 +485,8 @@ For platform claims:
 - a private fixture is not a supported public SDK or application surface.
 
 Record exact commit and run links in the owning specification's status/evidence
-section or the changelog. The completion matrix should link to the owner rather
-than duplicate those run IDs.
+section or the changelog. Link the completion matrix to that owner instead of
+copying run IDs into it.
 
 ## Evidence strength
 
@@ -516,6 +500,6 @@ From weakest to strongest:
 6. external consumer or representative application evidence;
 7. maintained release and compatibility evidence.
 
-Higher evidence does not erase scope limits. A perfectly replayed scalar report
-is still a scalar report; it does not prove general aggregates, resources, or
-production interoperability.
+More evidence does not widen the feature tested. Even a perfectly replayed
+scalar report does not prove general aggregates, resources, or production
+interoperability.

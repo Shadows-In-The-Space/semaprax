@@ -6,9 +6,9 @@ Status: implemented additive source profile; **HOSTED GREEN** under the
 Audience: standard-library contributors, compiler maintainers, and backend
 implementers.
 
-`std.log` provides a bounded structured JSON-lines writer for one caller-owned
-event. It composes the existing `std.io.Writer`, JSON quoting, and decimal
-formatting helpers without ambient effects or hidden allocation.
+`std.log` writes one caller-owned event as bounded structured JSON Lines. It
+uses `std.io.Writer`, JSON quoting, and decimal formatting without ambient
+effects or hidden allocation.
 
 ## Event and output
 

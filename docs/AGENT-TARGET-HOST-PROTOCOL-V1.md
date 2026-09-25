@@ -1,16 +1,15 @@
 # Agent target host-call protocol v1
 
-Audience: agent-runtime integrators and compiler contributors maintaining the target host-call boundary.
+Audience: runtime integrators and compiler contributors.
 
-Status: **authored implementation for #182; publicly selectable through the
-source-live typed-effect target adapter with an explicitly injected host.** It
-is not deployed native or Wasm target support.
+This protocol hands one freshly authorized typed-effect request to an
+explicitly injected target host. It defines the host-call boundary in
+`agent_lifecycle::authorization::target_protocol`, not a production native
+or Wasm Agent runtime.
 
-This document owns the target-neutral host-call boundary in
-`agent_lifecycle::authorization::target_protocol`. It is additive to the
-retained-interpreter lifecycle, typed-effects v3, and private C11/Core-Wasm
-stage executor seam. It does not claim that an Agent stage has been moved to a
-production native or Wasm route.
+Status: authored implementation for #182, publicly selectable through the
+source-live typed-effect target adapter. It adds to the retained-interpreter
+lifecycle, typed-effects v3, and private C11/Core-Wasm stage executor seam.
 
 ## Contract
 

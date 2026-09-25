@@ -6,9 +6,8 @@ Status: reviewed local aggregate passed at exact subject
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract executes the selected Phase 0 evidence set freshly at one clean
-exact local HEAD. It does not combine or transfer the three historical archives.
-The runner is:
+This runner executes the selected Phase 0 gates at one clean, exact local HEAD.
+It does not combine or transfer three historical archives:
 
 ```sh
 python3 scripts/graph-operational-phase0-evidence.py \

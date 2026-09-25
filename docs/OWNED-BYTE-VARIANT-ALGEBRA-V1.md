@@ -13,8 +13,8 @@ continues to define its earlier admitted shapes and bytes.
 
 ## Purpose
 
-Owned Byte Variant Algebra v1 admits the first non-Copy sum execution path.
-It admits flat monomorphic authored variants with at least one direct `Bytes`
+This is the first non-Copy sum execution path. It admits flat monomorphic
+authored variants with at least one direct `Bytes`
 field, a bounded concrete authored-generic extension with one owned case, an
 additive exact two-owned-case authored shape, and the compiler-owned `Option<Bytes>`,
 `Result<Bytes, i64|bool>`, `Result<i64|bool, Bytes>`, and exact
@@ -69,11 +69,13 @@ match borrow value {
 }
 ```
 
-`match own` consumes the active variant case and transfers every direct owned
-field to its exact arm binding. An owned wildcard cannot conceal a payload.
-`match borrow` accepts one unprojected named owned or borrowed place, creates
-arm-scoped aliases, transfers no cleanup epoch, and leaves the owner available
-after the arm. Explicit owned/borrowed arms return Copy scalars in v1.
+Use `match own` to consume the active case. It transfers every direct owned
+field to the corresponding arm binding; an owned wildcard cannot hide a payload.
+
+Use `match borrow` with one unprojected named owned or borrowed place.
+It creates aliases that last only for the arm, transfers no cleanup epoch, and
+leaves the owner available afterward. In v1, explicit owned and borrowed arms
+return Copy scalars.
 
 ## Conditional ownership representation
 
@@ -105,11 +107,11 @@ postcondition finalizes the complete guarded `Ok`/`Err` domain before returning
 the already selected sticky failure. A successful postcondition publishes the
 provisional Result without finalizing it.
 
-Independent replay reconstructs the case domain, paths, conditional groups,
-transitions, call commit, arm settlement, and finalizer order from HIR. It
-rejects foreign tags or fields, forged modes or ownership, inactive-case
-liveness, whole-union Copy operations, missing transitions, and cleanup drift.
-Legacy CleanupPlan schemas remain byte-stable.
+Independent replay rebuilds the case domain, paths, conditional groups,
+transitions, call commit, arm settlement, and finalizer order from HIR.
+It rejects foreign tags or fields, forged modes or ownership, live inactive
+cases, whole-union Copy operations, missing transitions, and cleanup drift.
+Earlier CleanupPlan schemas keep their exact bytes.
 
 ## Executable backends
 

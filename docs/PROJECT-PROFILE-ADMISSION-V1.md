@@ -9,11 +9,10 @@ separately gated.
 Audience: compiler contributors, Project profile authors, and promotion
 reviewers.
 
-Project Profile Admission v1 is the sole exhaustive Phase-A dispatcher from an
-exact parsed Project manifest and its already linked entry HIR into one closed
-schema-selected target profile. It prevents a profile from being parsed and
-implemented by individual generators while remaining absent from ordinary
-Project construction.
+Project Profile Admission v1 is the single exhaustive Phase-A dispatcher. It
+maps an exact parsed Project manifest and linked entry HIR to one closed target
+profile selected by the schema. This prevents individual generators from
+supporting a parsed profile that ordinary Project construction cannot admit.
 
 ## Authority boundary
 
@@ -22,9 +21,9 @@ entry program, and Project/workspace/graph subject facts constructed by the
 ordinary Project builder. It has no path, handle, filesystem, process,
 publication, transport, persistence, or target-execution authority.
 
-A successful prepared admission is invocation-owned compiler state, not a
-proof capsule, receipt, capability, or reusable authority. It cannot bypass
-HIR validation or authorize a later effect. Public descriptor consumers must
+Successful preparation produces compiler state owned by the invocation, not a
+proof capsule, receipt, capability, or reusable authority. It cannot skip HIR
+validation or authorize a later effect. Public descriptor consumers must
 still independently replay descriptor bytes against the retained HIR.
 
 ## Closed dispatcher

@@ -4,7 +4,7 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax cxx-shim <file.spx>` is a deterministic, read-only projection that
+`semaprax cxx-shim <file.spx>` is a deterministic read-only projection that
 derives one C++17-compatible header fragment from verified program facts for
 explicitly selected public monomorphic scalar functions. It is the first
 executable slice of the completion-matrix row "C++" under Ecosystem
@@ -36,12 +36,10 @@ semaprax cxx-shim <file> --function name|stable-id[,...] [--function ...] [--max
 
 ## Admission model
 
-The admission profile is exactly C Header Emission v1's: only explicitly
-selected functions are considered; a selected function is admitted only when
-it has an explicit stable identity, is monomorphic, declares no effects, has
-only by-value direct parameters over the full Copy-scalar surface (`i64`,
-`i32`, `u8`, `bool`, `f32`, `f64`, `char`; mixed signatures allowed), and
-returns a direct scalar from that same surface.
+Admission exactly matches C Header Emission v1. A selected function needs an
+explicit stable ID, monomorphic/effect-free shape, by-value direct Copy-scalar
+parameters (`i64`, `i32`, `u8`, `bool`, `f32`, `f64`, `char`), and a direct
+scalar result from that surface.
 Every other selected function is recorded as an exclusion with one closed
 reason: `automatic_identity`, `generic_function`, `declared_effects`,
 `unsupported_parameter_mode`, `unsupported_parameter_type`, or
@@ -53,14 +51,10 @@ closed.
 
 ## Fragment content
 
-Emitted declaration lines are extracted verbatim from the actual
-`codegen::emit_c` native projection — exactly one prototype line must exist
-per admitted symbol or the command fails with `SPX-X105` — so every shim
-declaration matches the ABI the native backend really emits, including the
-`spx_status_token` return, the leading `struct spx_context *spx_ctx`
-parameter, positional unnamed parameters, and the `*spx_result_out` out
-parameter. The declarations sit inside one `extern "C"` block so C++ name
-mangling cannot silently mismatch the native symbols.
+Declarations come verbatim from `codegen::emit_c`: each admitted symbol needs
+one prototype or fails `SPX-X105`. This preserves the native return, context,
+positional parameters, and result out-pointer. One `extern "C"` block prevents
+C++ name mangling from changing the symbols.
 
 Each admitted function carries a generated block comment containing only
 typed facts: the display name, the persistent stable ID, each `requires` and
@@ -73,9 +67,8 @@ is rejected with `SPX-X104` if it contains `*/`, newlines, carriage returns,
 or control characters, so host input can never terminate a comment or smuggle
 bytes into the artifact. Functions are ordered bytewise by stable identity.
 
-The include guard is derived only from the sorted admitted stable identities
-through a domain-separated SHA-256 digest (`semaprax.cxx-shim.guard.v1`),
-formatted as `SPX_CXX_SHIM_` plus 32 lowercase hex characters.
+The include guard comes only from sorted admitted stable IDs through
+`semaprax.cxx-shim.guard.v1`, formatted as `SPX_CXX_SHIM_` plus 32 lowercase hex characters.
 Formatting-only source edits keep the guard byte-identical; renames that
 preserve identities keep the guard; renames that change an admitted identity
 change the guard. The preamble records the graph revision and admitted count.

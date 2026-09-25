@@ -8,18 +8,17 @@ The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
 local-only status for imported migration, durable recovery, selection refusal,
 and workspace associations.
 
-This profile extends the authenticated linked Agent lifecycle with a checked
-state migration between two retained Project source revisions. It composes the
-linked lifecycle v3 and typed-effects v4 products while preserving the direct
-migration v2/v3 products and all older bytes.
+This profile adds checked state migration between two retained Project source
+revisions to the authenticated linked Agent lifecycle. It combines linked
+lifecycle v3 and typed-effects v4 products without changing direct migration
+v2/v3 products or older bytes.
 
 ## Migration admission
 
 Migration starts only from an actual durable `Suspend` produced by the previous
 authenticated runtime. At least one side uses linked Project roles; a direct
-source runtime may occupy the other side. The previous runtime, its durable evidence, and
-the newly authenticated destination runtime are checked against their expected
-execution revisions. Each linked side is bound through its retained Project
+source runtime may occupy the other side. The previous runtime, its durable evidence and the authenticated destination
+runtime must match their expected execution revisions. Each linked side is bound through its retained Project
 closure, and no submitted checkpoint or evidence bytes supply migration
 authority.
 

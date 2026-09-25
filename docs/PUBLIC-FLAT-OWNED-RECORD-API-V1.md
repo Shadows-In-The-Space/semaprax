@@ -1,5 +1,7 @@
 # Public Flat Owned Record API v1
 
+In plain terms: this is the bounded record API contract, not a publication promise.
+
 Status: implemented bounded Project-v9 API; generated packages remain unpublished
 and formal public promotion remains open. Release regression evidence is **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
@@ -7,21 +9,17 @@ and formal public promotion remains open. Release regression evidence is **HOSTE
 Audience: compiler contributors, generated-package integrators, and promotion
 reviewers.
 
-Project v9 widens the public owned-data result vocabulary by exactly one
-authored aggregate shape. Its initial additive tranche preserves Project
-v1-v8 and their artifacts. Separately reviewed shared boundary corrections
-described below and in Public Owned Data API v1 intentionally change v8-v10
-Wasm/native-provider or Rust artifacts; selecting v9 never reinterprets a v8
-descriptor or selects a different profile's renderer.
+Project v9 adds exactly one authored aggregate result shape. It preserves the
+v1-v8 contracts: selecting v9 never reinterprets a v8 descriptor or selects a
+different profile renderer. Separately reviewed shared boundary corrections
+may change v8-v10 generated artifacts, as documented below and in Public Owned
+Data API v1.
 
-The v0.2.0 tag commit `5f6fb9655fdec92c57ab71615cfd7bfa8cc76051`
-passed the complete blocking
+The v0.2.0 commit passed its blocking
 [release run](https://github.com/wavect/semaprax/actions/runs/33608662244),
-including Linux, macOS, Windows, Rust 1.88, and selected generated-consumer
-coverage. Statements below that a tranche was “unrun” record its authoring
-state and are superseded only for nonignored tests selected by that workflow.
-Separately provisioned/ignored gates and the explicit publication decision
-remain open.
+including the listed host, Rust, and generated-consumer coverage. That evidence
+does not cover separately provisioned or ignored gates, and it does not publish
+the package.
 
 ## Fixed identifiers
 

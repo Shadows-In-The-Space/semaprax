@@ -8,10 +8,10 @@ separately gated.
 
 Audience: compiler contributors, embedding hosts and agents recovering unfinished work.
 
-This archive makes typed-hole recovery independent of the continued existence
-of the original source checkout. It combines the last valid candidate's
-self-contained source archive with the draft's pending selectors. It does not
-turn holes into source, restore unchecked HIR or grant publication authority.
+This archive can recover typed holes even after the original checkout is gone.
+It combines the last valid candidate's self-contained source archive with the
+draft's pending selectors. It does not turn holes into source, restore unchecked
+HIR, or grant publication authority.
 
 ## Library API and exact recovery
 
@@ -35,9 +35,9 @@ The archive nests the existing
 [complete-candidate source archive](PROJECT-CANDIDATE-ARCHIVE-V1.md) and
 [draft recovery capsule](PROJECT-CANDIDATE-DRAFT-RECOVERY-V1.md) as exact
 canonical strings. Their schemas, limits and source/history replay rules remain
-unchanged. The candidate archive includes the canonical original manifest and
-all canonical sources; the draft capsule includes the remaining body,
-expression and contract-expression selectors after any partial fills.
+unchanged. The candidate archive holds the original canonical manifest and
+sources. The draft capsule holds the body, expression and contract-expression
+selectors still pending after any partial fills.
 
 Restore validates outer grammar, compiler compatibility, resource bounds,
 canonical bytes and expected identities before trusting any nested meaning.

@@ -4,11 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-This document freezes the first executable diagnostic-repair contract. It is
-deliberately narrow: Phase A discovers and instantiates one repair for an exact
-`SPX-S103` automatic function identity, and Phase B applies the resulting one-
-operation Semantic Patch v3 through the unchanged single-file A0 transaction.
-The repair classification is exactly `breaking_identity_rebase`.
+This first executable diagnostic-repair contract has two restricted phases.
+Phase A discovers and instantiates one repair for an exact `SPX-S103` automatic
+function identity. Phase B applies the resulting one-operation Semantic Patch
+v3 through the unchanged single-file A0 transaction. The repair classification
+is exactly `breaking_identity_rebase`.
 
 This tranche is useful but partial. It is not general diagnostic repair, typed
 holes, repair ranking, repository-wide change, or stable-identity-preserving
@@ -37,9 +37,8 @@ The corresponding Rust API is
 `DiagnosticRepairQuery::assign_function_id`,
 `PersistentDeclarationId::new`, `repair::query`, and
 `repair::instantiate`. Discovery returns compact canonical
-`semaprax.diagnostic-repair.v1` JSON. Instantiation independently proves the
-candidate and returns compact canonical
-`semaprax.diagnostic-repair-preview.v1` JSON containing one exact
+`semaprax.diagnostic-repair.v1` JSON. Instantiation independently proves the candidate, then returns compact canonical
+`semaprax.diagnostic-repair-preview.v1` JSON with one exact
 `semaprax.semantic-patch.v3` source string. Neither command writes source,
 creates A0 artifacts, or commits the candidate.
 

@@ -7,14 +7,14 @@ Status: implemented bounded workspace protocol; **HOSTED GREEN** under the
 The earlier authoring-only status is superseded. This does not establish
 performance, unrestricted publication, or complete-programme support.
 
-V5 adds a host-configured session and explicit live-source refresh without
-changing v1–v4 method lists or response bytes. Its envelope is
+V5 adds host-configured sessions and explicit live-source refresh. V1–v4
+methods and response bytes do not change. The v5 envelope is
 `semaprax.image-agent-result.v5`, with protocol
 `semaprax.image-agent-protocol.v5`, exact `image_revision`, exact
-`project_revision`, and a method-specific `payload`. Existing non-discovery
-semantic payload schemas remain their owned versions. Discovery descriptions,
-schemas, and generated clients derive from the methods actually enabled by the
-fixed host policy; user payload strings are never rewritten to upgrade schemas.
+`project_revision`, and a method-specific `payload`. Non-discovery semantic
+payloads keep their owned schema versions. Discovery, schemas, and generated
+clients reflect the fixed host policy's enabled methods. User payload strings
+are never rewritten to upgrade schemas.
 
 ## Host configuration
 
@@ -289,13 +289,12 @@ report bytes. Historical candidates occupy the same registry; refresh does not
 create an unbounded history. Hosts can explicitly discard historical candidates
 to make room for a new base. Registry accounting is not a complete HIR/RSS bound.
 
-Ordinary handlers prepare payloads and mutations without modifying the registry,
-admit capacity, render the complete response, and perform final source
-authentication before committing a mutation. Response overflow discards the
-prepared mutation. The transport accepts at most 64 KiB per frame and produces
-at most 1 MiB per response, using the existing strict NDJSON framing/JSON-RPC
-codec. Oversized input ends the stream; notifications remain silent and do no
-semantic work. Query/report owners retain their own smaller limits.
+Handlers prepare without changing the registry, check capacity, render the
+complete response, and reauthenticate source before committing a mutation.
+Response overflow discards the prepared mutation. Strict NDJSON/JSON-RPC framing
+allows at most 64 KiB per input frame and 1 MiB per response. Oversized input
+ends the stream; notifications stay silent and perform no semantic work.
+Query and report owners keep their smaller limits.
 
 `with_git_commit_host` attaches a fixed manifest-matching Git authority only
 before the first frame. `approve_git_commit` is a separate host API, never an

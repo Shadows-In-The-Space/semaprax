@@ -6,11 +6,10 @@ Public borrowed ABI and general lifetime support remain separate.
 
 Audience: compiler, ownership-verifier, backend, and evidence maintainers.
 
-This specification repairs the execution boundary for the already admitted
-internal `borrow Bytes` parameter and adds one direct projected origin. Source
-HIR and Shared Loan Plan v1 already distinguish a synchronous shared borrow
-from ownership transfer; the interpreter, native, and Core-Wasm lanes must
-preserve that distinction exactly.
+This profile corrects execution of the existing internal `borrow Bytes`
+parameter and admits one direct projected origin. Source HIR and Shared Loan
+Plan v1 distinguish synchronous shared borrowing from transfer; interpreter,
+native, and Core Wasm must preserve that distinction.
 
 ## Closed source profile
 

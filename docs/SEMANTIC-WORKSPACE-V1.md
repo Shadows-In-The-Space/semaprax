@@ -4,18 +4,14 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Semantic Workspace v1 is the managed, read-only source authority for unified
-cross-file SEMAPRAX semantics. It authenticates 2–32 existing canonical `.spx`
-files, resolves them together once, and publishes an immutable generation by
-replacing one `ACTIVE` file. Initialization never rewrites the original source
-paths.
+Semantic Workspace v1 authenticates 2–32 existing canonical `.spx` files and
+resolves their cross-file meaning together. It publishes an immutable managed
+generation through one `ACTIVE` replacement; initialization does not rewrite
+the original source files.
 
-This protocol is distinct from
-[Semantic Workspace Transaction v1](SEMANTIC-WORKSPACE-TRANSACTION-V1.md).
-Both use `.semaprax-workspace` and its single permanent `LOCK`, but their
-`ACTIVE` and manifest schemas are disjoint. An ordinary Workspace v1 reader
-must reject a Semantic Workspace v1 root, and a semantic reader must reject an
-ordinary root.
+It is distinct from [Semantic Workspace Transaction v1](SEMANTIC-WORKSPACE-TRANSACTION-V1.md).
+Both use `.semaprax-workspace` and one permanent `LOCK`, but their `ACTIVE` and
+manifest schemas differ. Each reader must reject the other's root.
 
 ## Public API and command
 

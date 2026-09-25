@@ -18,8 +18,7 @@ exactly `string_len(s) == 0`.
 
 ## Admission shape
 
-Free-function intrinsics with compiler-reserved identities were chosen over
-the two alternatives:
+Compiler-reserved free functions avoid two larger changes:
 
 - **Method-call syntax** (`s.len()`) would require primitive-receiver dispatch
   in the verifier, resolver, validator, cleanup planner, graph projection, and
@@ -49,7 +48,7 @@ monomorphic [`hir::ResolvedExprKind::Call`] whose callee carries the reserved
 
 ## Ownership
 
-Consumption mirrors existing String move-checking exactly:
+Consumption follows existing String move-checking:
 
 - `string_concat` arguments use the same synthetic `own` parameter shape as an
   ordinary declared `string` parameter, so the shared transfer machinery marks
@@ -61,15 +60,10 @@ Consumption mirrors existing String move-checking exactly:
 
 ## Backends
 
-- Native C11: gated runtime helpers (`spx_string_len`, `spx_string_concat`,
-  `spx_string_is_empty`) appended after the string runtime only when a program
-  reaches the operations, so existing projections keep their exact committed
-  bytes. Consuming operations free their input buffers exactly at the
-  operation site, like owned string equality.
-- Wasm32: two optional host imports (`spx_string_len`, `spx_string_concat`)
-  appended after the base string imports only when used; `is_empty` lowers as
-  `len` + `i64.eqz`. Modules for programs without the operations keep their
-  exact bytes.
+- Native C11: helpers append only when used, preserving prior projection bytes.
+  Consuming operations free inputs at the operation site, like owned equality.
+- Wasm32: optional `spx_string_len`/`spx_string_concat` imports append only
+  when used; `is_empty` is `len` + `i64.eqz`, preserving unused-module bytes.
 - Interpreter: intrinsic calls evaluate inside the scalar profile with the
   same byte semantics; user functions taking strings remain outside the
   profile exactly as before.

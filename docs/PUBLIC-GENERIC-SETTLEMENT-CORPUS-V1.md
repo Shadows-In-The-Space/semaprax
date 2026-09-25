@@ -3,28 +3,26 @@
 Status: implemented fixture/native evidence subset of issue #162. This is not
 full PG-7 completion, a hosted-green declaration, or a publication decision.
 
+In plain terms: this file fixes the hostile test inputs and expected results; it does not open a public boundary.
+
 Audience: native and Core Wasm settlement reviewers, and public-generic-milestone maintainers.
 
 ## Scope and owning code
 
-`tests/fixtures/public-generic-settlement-v1/cases.json` is the shared,
-machine-readable `semaprax.public-generic-settlement-corpus.v1` manifest. The
-library and native integration harnesses include the same bounded loader,
-`tests/support/public_generic_settlement_manifest.rs`. The native harness still
-uses `native::template::render_reference_provider`; the independent Python gate
-composes the same C fragments and exact fixture binding preimages.
+`tests/fixtures/public-generic-settlement-v1/cases.json` is the shared
+machine-readable manifest. Library and native harnesses use the same bounded
+loader, `tests/support/public_generic_settlement_manifest.rs`; the Python gate
+independently composes the same C fragments and binding preimages.
 
 The admitted profile is explicitly `flat-owned-bytes-reference-fixture.v1`.
 The descriptor fixture is not a descriptor reconstructed from a checked generic
 export. The endpoint reverses each independent owned byte leaf. Two flat leaves
 are not evidence for nested generic records or a Copy-scalar calling boundary.
 
-The existing four-engine comparison covers the interpreter boundary model,
-Core-Wasm in-process model, and compiled native C11 at O0/O2. Calling the Wasm
-model does not establish execution of a compiled provider module. Production
-provider ABI declarations, canonical logical-carrier schemas, generated-client
-interfaces, diagnostics, and unsupported/unpublished standing decisions are
-unchanged by this evidence extension.
+The comparison covers interpreter, in-process Core Wasm, and compiled native
+C11 at O0/O2. The Wasm model is not a compiled provider module. Production ABI,
+logical-carrier schemas, generated clients, diagnostics, and standing nonclaims
+are unchanged.
 
 ## Manifest contract
 

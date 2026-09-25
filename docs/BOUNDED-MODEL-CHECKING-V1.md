@@ -13,11 +13,9 @@ outcome joins in the same way theirs do: as an externally supplied
 `semaprax.model-checking.v1` (`../src/assurance_manifest/model_checking/`)
 is a deterministic, bounded, explicit-state model checker: a generic
 `TransitionSystem` trait, a breadth-first exploration engine over it with
-hard-required bounds, and two committed protocol projections. It answers
-"does every state reachable within these exact bounds satisfy this
-invariant" and "is some state satisfying this predicate reachable within
-these exact bounds", and it reports incomplete exploration as its own
-outcome rather than as a weaker form of "yes". It is proof data, not
+hard-required bounds, and two committed protocol projections. Within the exact selected bounds, it checks whether every reachable state
+satisfies an invariant or whether a state satisfying a predicate is reachable.
+Incomplete exploration is a separate outcome, never a qualified "yes". It is proof data, not
 permission: it never runs a target, spawns a process, discovers or runs
 project tests, writes source, or removes a runtime guard.
 
@@ -38,20 +36,18 @@ formalism.
 
 [`engine::TransitionSystem`](../src/assurance_manifest/model_checking/engine.rs)
 is the one trait a model implements: `initial_states`, `enabled_events`,
-`apply`, `is_terminal`, `safety_invariant`. `State` and `Event` must be
-`Ord` so the engine deduplicates visited states with a `BTreeSet`/
-`BTreeMap` rather than a `HashSet`/`HashMap` — deterministic regardless of
-hasher, build, or platform, the same reason `cleanup_plan`'s canonical
-vectors are never sorted by an incidental hash order.
+`apply`, `is_terminal`, `safety_invariant`. `State` and `Event` must implement `Ord`. The engine deduplicates visited
+states with `BTreeSet`/`BTreeMap`, not `HashSet`/`HashMap`, so results do not
+depend on the hasher, build or platform. Likewise, incidental hash order must
+never determine the order of canonical `cleanup_plan` vectors.
 
 [`engine::Bounds`](../src/assurance_manifest/model_checking/engine.rs) has
 three required fields and no `Default`: `max_states` and `max_transitions`
 are hard caps that stop the search the instant they would be exceeded (they
-bound memory and wall time, not search depth); `max_depth` is the classical
-bounded-model-checking "k" — a per-branch bound, so a branch that reaches
-it stops expanding while shallower sibling branches still finish, and the
-minimal-counterexample search a shorter violation would need is never
-truncated by a depth limit sized for a different, longer branch.
+bound memory and wall time, not search depth); `max_depth` is the bounded-model-checking "k": a limit for each branch. A
+branch stops expanding at that depth while shallower siblings continue. This
+preserves the search for shorter counterexamples even when another branch
+reaches its depth limit.
 
 [`engine::check_safety`](../src/assurance_manifest/model_checking/engine.rs)
 runs one bounded, deterministic breadth-first exploration and returns an

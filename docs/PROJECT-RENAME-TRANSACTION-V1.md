@@ -16,18 +16,18 @@ semapraxd --stdio --allow-project-rename \
   [--max-request-bytes N] [--max-response-bytes N]
 ```
 
-The default command remains the byte-preserved, read-only v2 profile. A v2
-session reports neither rename method, and attempts to call them receive
-JSON-RPC `-32601` without changing a source.
+The default command keeps the read-only v2 profile and its exact bytes. A v2
+session advertises neither rename method; calling either returns JSON-RPC
+`-32601` without changing source.
 
 ## Admitted transaction
 
 One transaction changes the display name of one monomorphic function selected
 by the bound Project manifest's `web_exports`. The function must have an
 explicit stable `@id`; the request names that identity and the exact current
-and replacement display names. The source path and patch bytes are derived by
-the server from authenticated retained meaning. Requests cannot supply a root,
-path, source buffer, patch file, evidence file, or output location.
+and replacement display names. The server derives the source path and patch bytes from authenticated retained
+meaning. Requests cannot supply roots, paths, source buffers, patch files,
+evidence files, or output locations.
 
 Both methods require the exact `project_revision` and `workspace_revision`
 returned by `workspace/open`:

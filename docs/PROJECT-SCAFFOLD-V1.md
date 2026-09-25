@@ -8,14 +8,13 @@ Audience: new SEMAPRAX users, tool integrators, and compiler contributors.
 
 ## Purpose
 
-The Public Project Scaffold Capsule v1 is an authority-free, replayable form of
-the built-in calculator Project. It lets a caller obtain the exact four files
-needed to create a canonical Project v1 without granting the compiler a
-filesystem location or publication authority.
+The Public Project Scaffold Capsule v1 provides a replayable copy of the
+built-in calculator Project. Callers receive the exact four files needed for a
+canonical Project v1 without giving the compiler a filesystem location or
+publication authority.
 
 The capsule is not the private `new` workflow. `new` retains its held-parent,
-create-new staging, authentication, and no-replace publication contract. A
-capsule consumer chooses whether, where, and how to materialize files and must
+create-new staging, authentication, and no-replace publication contract. The capsule consumer decides whether, where and how to write files, and must
 provide its own safe publication policy.
 
 ## Rust API and CLI

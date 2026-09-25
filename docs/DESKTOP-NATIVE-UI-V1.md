@@ -6,9 +6,9 @@ Status: implemented, source-locked, and hosted green for the bounded AppKit and
 Win32 packages: macOS in [run 31338834586, job 93309086230](https://github.com/wavect/semaprax/actions/runs/31338834586/job/93309086230)
 and Windows in [run 31343897595, job 93322134480](https://github.com/wavect/semaprax/actions/runs/31343897595/job/93322134480).
 
-This milestone composes the existing private callable-v3 desktop engine with a
-small real OS-native frontend. It remains outside the public compiler and is
-not a SEMAPRAX UI dialect or application API.
+This milestone combines the private callable-v3 desktop engine with a small
+OS-native frontend. It remains outside the public compiler: it is neither a
+SEMAPRAX UI dialect nor an application API.
 
 ## Platform fixtures
 
@@ -19,10 +19,10 @@ not a SEMAPRAX UI dialect or application API.
   native `BUTTON`, `IAccessible` name query, `WM_TIMER` to `BM_CLICK` event,
   `GetMessageW` loop, `WM_DESTROY`, and `PostQuitMessage`.
 
-Both frontends execute the package-bound sibling `SemapraxPrivateEngine` rather
-than reimplementing ownership semantics. The packager publishes a canonical
-lowercase SHA-256 manifest, and each frontend hashes the exact engine bytes and
-rejects a mismatch before process launch. Windows retains its read handle
+Both frontends run the package-bound sibling `SemapraxPrivateEngine`; they do
+not reimplement ownership semantics. The packager emits a canonical lowercase
+SHA-256 manifest. Before launch, each frontend hashes the exact engine bytes
+and rejects any mismatch. Windows retains its read handle
 through `CreateProcessW`; AppKit verifies immediately before `NSTask` launch.
 They then accept only the engine's exact two-call, generation-rotation, and
 receipt-replay output. Success is published to a new caller-selected result file

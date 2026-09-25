@@ -192,9 +192,9 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
     for exact in [
         title.as_str(),
         "## Changes",
-        "Bind effect-free retained source job handlers",
-        "Add direct owned String variant payloads",
-        "Add explicit Rust-host Argon2id",
+        "Pin the Wavect GmbH release verifier",
+        "Add a deterministic, non-executing cross-language benchmark",
+        "Share one bounded, digest-pinned public-generic settlement manifest",
         "These unsigned archives are not notarized",
         "SHA-256 checksums are integrity facts, not signatures.",
     ] {
@@ -203,7 +203,7 @@ fn release_automation_checks_version_surfaces_and_renders_only_one_changelog_buc
     // Every other bucket stays out, including the one immediately before this
     // release: a renderer that walked past its section would pick that up
     // first.
-    for other in ["## 0.4.1", "## 0.4.0", "## Unreleased"] {
+    for other in ["## 0.5.0", "## 0.4.1", "## Unreleased"] {
         assert!(
             !notes.contains(other),
             "release notes leaked another bucket: {other}"
@@ -417,10 +417,10 @@ fn release_reconcile_agrees_with_the_real_published_v0_4_1_evidence() {
     // `no-candidate` even though the repository does have a published
     // release. Ensure the tag is present before reconciling; this is a
     // read-only `git fetch` and does not mutate any repository file.
-    // After the 0.5.0 bump the current prerelease tag is 0.5.0
+    // After the 0.6.0 bump the current prerelease tag is 0.6.0
     // (tagged-unpublished), but the real published evidence for 0.4.1 must
     // remain hosted-green.
-    for version in ["0.4.1", "0.5.0"] {
+    for version in ["0.4.1", "0.6.0"] {
         let tag_check = Command::new("git")
             .args(["rev-list", "-n1"])
             .arg(format!("v{version}"))
@@ -435,11 +435,11 @@ fn release_reconcile_agrees_with_the_real_published_v0_4_1_evidence() {
             break;
         }
     }
-    // 0.5.0 is the current prerelease tag (bumped by prepare-release).
+    // 0.6.0 is the current prerelease tag (bumped by prepare-release).
     // Its local state is `tagged-unpublished` until the GitHub Release is
     // published and `docs/RELEASE-PROCESS.md` gains its evidence section.
     {
-        let (version, expected_state) = ("0.5.0", "tagged-unpublished");
+        let (version, expected_state) = ("0.6.0", "tagged-unpublished");
         let output = Command::new("python3")
             .args(["scripts/release-reconcile.py", "--version", version])
             .current_dir(root)
@@ -457,9 +457,9 @@ fn release_reconcile_agrees_with_the_real_published_v0_4_1_evidence() {
             "unexpected state for {version}"
         );
     }
-    // 0.4.1 must remain `published-documented` even after the 0.5.0 bump;
+    // 0.4.1 must remain `published-documented` even after the 0.6.0 bump;
     // the full `release-reconcile.py --version 0.4.1` would now also check
-    // `docs/CHANGELOG-SUMMARY.md`'s current-tag claim (now 0.5.0) and report a
+    // `docs/CHANGELOG-SUMMARY.md`'s current-tag claim (now 0.6.0) and report a
     // stale-summary problem, so we verify the historical evidence directly.
     let check = Command::new("python3")
         .args([

@@ -35,10 +35,10 @@ semaprax freestanding-object <file> [--max-bytes N]
 
 ## Host-scaffolding exclusions and substitutions
 
-The freestanding unit differs from the hosted native projection by exactly
-four recorded exclusions and two recorded substitutions; every edit is
-anchored on exact unique markers in the produced bytes, so drift in the
-production lane fails closed (`SPX-A104`) instead of emitting stale artifacts.
+The freestanding unit makes exactly four recorded exclusions and two recorded
+substitutions from the hosted native projection. Each edit uses exact unique
+markers in the produced bytes. If production output drifts, generation fails
+with `SPX-A104` rather than emitting a stale artifact.
 
 Exclusions:
 
@@ -62,9 +62,9 @@ Substitutions:
 
 ## Profile assertions
 
-Four assertions are computed by explicit deterministic textual checks over the
-emitted bytes and re-checked during independent replay; generation fails
-closed rather than recording a false assertion:
+Explicit deterministic text checks compute four assertions over the emitted
+bytes. Independent replay checks them again. Generation fails rather than
+recording a false assertion:
 
 - `no_runtime` — no host entry wrapper, no stdio/stdlib includes, no printf/
   fprintf/fputs/stderr/abort references, no public-failure reporter; the

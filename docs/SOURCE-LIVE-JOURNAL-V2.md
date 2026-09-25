@@ -7,8 +7,7 @@ Source Live Journal v2 is the bounded checkpointed route for one compiled
 iterative source lifecycle. It is implemented by
 `CompiledIterativeLifecycle::run_live_durable`,
 `agent_lifecycle::iterative::source_live`, and the v2 execution profile of
-`live_invocation::source_journal`. The ordinary `run_live` API remains an
-unchanged, nondurable route. This document records implementation semantics;
+`live_invocation::source_journal`. The ordinary `run_live` API stays unchanged and nondurable. This document records implementation semantics;
 its focused local gates exercise checked execution and injected host boundaries.
 This v2 contract alone does not claim hosted execution, live-provider execution,
 or runtime durability beyond the supplied `CheckpointStore` contract. The
@@ -28,13 +27,13 @@ response limit, iteration/stage/attempt limits, stage-fuel limits, model
 ceiling and fixed reservation units, clock domain and absolute deadline, and
 optional ProgramRoot.
 
-The binding is not authority. The source task, checkpoint, terminal receipt,
-model text, usage report, or evidence bytes cannot manufacture a model invoke
+The binding grants no authority. A source task, checkpoint, terminal receipt,
+model text, usage report, or evidence bytes cannot create a model invoke
 capability, grant, effect handler, credential, store writer, or migration
-authority. The trusted host selects the store, owns the exclusive writer, and
-loads its latest authoritative generation. The hash chain verifies canonical
-integrity and causal order, but neither authenticates a store nor proves that a
-valid older generation is fresh.
+authority. The trusted host selects the store, owns its exclusive writer, and
+loads the latest authoritative generation. The hash chain checks canonical
+integrity and causal order; it does not authenticate the store or prove an
+older valid generation is current.
 
 V2 uses the source execution schema
 `semaprax.live-invocation.source-persisted-journal.v2`, separate from both the
@@ -47,8 +46,8 @@ and chain domains. It leaves v1, v2, and v3 canonical bytes and decoders
 unchanged. V4 `PricedAttemptIntent` binds the existing work reservation with
 an exact integer minor-unit reservation and global money ordinal before
 dispatch. Its paired `PricedAttemptUsage` closes usage and charge evidence as
-`Unknown` or typed `Observed`; missing receipts and untyped provider costs stay
-`Unknown`, never inferred zero or float conversions.
+`Unknown` or typed `Observed`; missing receipts and untyped provider costs remain `Unknown`. They are never
+assumed to be zero or converted from floats.
 
 The additive v5 profile binds cumulative provider request and response
 reservations around the existing authenticated attempt rows. It changes no

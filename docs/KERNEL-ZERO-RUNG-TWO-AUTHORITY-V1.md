@@ -1,5 +1,7 @@
 # Kernel-0 Rung-2 Formatter Authority v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: implemented local compiler boundary for issue #188. This is neither a
 self-hosting-rung promotion nor a public ABI, hosted result, target-runtime
 claim, authority transfer, or owned Kernel-0 buffer. The private
@@ -9,19 +11,16 @@ changing the scalar proof boundary.
 
 ## Closed subject
 
-`src/kernel_zero/rung_two_authority.rs` owns the one production adapter for
-the five existing embedded-source byte lanes, in bootstrap-v2 order: `char`,
-`bool`, `int`, `operator`, and `string-scalar`. `src/format/kernel_zero_tokens.rs`
-is its only formatter caller. The five sibling renderer modules retain their
-own `BoundTranslation` and replay the exact embedded source before every full
-candidate evaluation.
+`src/kernel_zero/rung_two_authority.rs` is the one production adapter for five
+embedded-source lanes, in bootstrap-v2 order: `char`, `bool`, `int`,
+`operator`, and `string-scalar`. Its only formatter caller is
+`src/format/kernel_zero_tokens.rs`; each renderer replays its exact source
+before evaluating a candidate.
 
-The adapter accepts a caller-owned fixed token of 20 bytes. Char literals need
-at most 12 bytes, decoded string-scalar fragments at most 10, booleans 5, and
-operators 2. Twenty is the exact justified shared bound because canonical
-decimal `i64::MIN` is `-9223372036854775808`, which is 20 ASCII bytes. A new
-lane or a Rust reference longer than this limit must fail review and extend a
-new versioned contract; it may not silently enlarge the array.
+The adapter accepts a caller-owned 20-byte token. The longest supported value,
+canonical `i64::MIN`, is `-9223372036854775808` (20 ASCII bytes); all other
+lanes are shorter. A new lane or longer reference requires review and a new
+versioned contract, never a silent array enlargement.
 
 ## Selection protocol
 

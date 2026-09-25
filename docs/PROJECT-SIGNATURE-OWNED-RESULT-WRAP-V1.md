@@ -29,8 +29,8 @@ must not be either Project entrypoint or a manifest web export. The selected
 wrapper must be an existing, visible, explicit, monomorphic record with exactly
 one explicit field. Retained checked HIR must prove that field has the exact
 original result type and that the record is sized, resource-free, non-Copy,
-and cleanup-owning. Record and field display spellings come from authenticated
-source bindings; request bytes select stable identities only.
+and cleanup-owning. The compiler derives record and field names from authenticated source bindings.
+Requests select only stable identities.
 
 Admission authenticates the provider source and checked signature, the whole
 record and field shape, and every stable-ID-bound local call inventory before
@@ -44,10 +44,9 @@ and the authenticated count must equal the rewritten count.
 The provider wraps its former body exactly once in the selected record
 constructor at the existing result position. Each local caller keeps its
 existing left-to-right argument staging and call commit, then immediately
-projects and moves the sole field. The call is evaluated once. The provider
-record owns the result until publication; after projection, ordinary caller
-cleanup owns the moved `Bytes` or `string` and cleans the empty record according
-to the compiler's existing structural plan. Full Project reconstruction
+projects and moves the sole field. The call runs once. The provider record owns the result until publication.
+After projection, ordinary caller cleanup owns the moved `Bytes` or `string`
+and cleans the empty record using the existing compiler structural plan. Full Project reconstruction
 rechecks HIR, ownership, cleanup, interpreter admission, native emission, Wasm
 emission, manifests, and target admission before the candidate is observable.
 

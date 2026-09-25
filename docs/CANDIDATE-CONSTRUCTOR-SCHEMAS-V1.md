@@ -8,11 +8,11 @@ separately gated.
 
 Audience: agent builders, compiler contributors, and reviewers.
 
-`SemanticChange::constructor_schemas()` and the candidate-only protocol method
-`protocol/constructor-schemas` return
-`semaprax.candidate-constructor-schemas.v1`. The transport method requires the
-current `image_revision` and existing held-source authentication. It creates no
-candidate and changes no registry or filesystem state.
+`SemanticChange::constructor_schemas()` and the candidate-only
+`protocol/constructor-schemas` method return
+`semaprax.candidate-constructor-schemas.v1`. The method requires the current
+`image_revision` and held-source authentication. It creates no candidate and
+changes neither registry nor filesystem state.
 
 The result carries four JSON Schema draft 2020-12 documents identified by:
 
@@ -21,11 +21,10 @@ The result carries four JSON Schema draft 2020-12 documents identified by:
 - `urn:semaprax.semantic-change.v1`
 - `urn:semaprax.project-candidate-recovery.v1`
 
-Each document is self-contained. Recursive expressions use local `$defs`
-references; validators need no network lookup. These IDs resolve the existing
-constructor references exposed by Image Candidate Protocol v2 without changing
-its previous request descriptors. Every constructor object has explicit
-required fields and `additionalProperties: false`.
+Each document is self-contained: recursive expressions reference local `$defs`,
+so validation needs no network lookup. These IDs resolve Image Candidate
+Protocol v2's constructor references without changing its request descriptors.
+Constructor objects name required fields and set `additionalProperties: false`.
 
 Expression alternatives cover exact typed `i64`, `i32`, `char`, `u8`, `usize`,
 `f32`, `f64`, and `bool` literals; bounded decoded string and explicit

@@ -8,11 +8,11 @@ separately gated.
 
 Audience: compiler contributors and hosts managing trusted compiler installations.
 
-This opt-in host store preserves compiler-created checked-module HIR across
-processes. A fresh process authenticates the complete private cache, parses its
-canonical source again, and rebuilds the linked Project and graph while reusing
-checked module HIR. This is actual resolver reuse, with bounded private decoding;
-it is not a portable source archive or a general incremental compiler.
+This opt-in host store keeps compiler-created checked-module HIR across
+processes. A fresh process authenticates the private cache, reparses canonical
+source, and rebuilds the linked Project and graph while reusing checked HIR.
+That reuses resolver work with bounded private decoding; it is neither a
+portable source archive nor a general incremental compiler.
 
 ## Host surface
 
@@ -140,6 +140,11 @@ contract or a way for an agent to submit graph facts as canonical meaning.
 After decoding authenticated state, load independently parses/formats every
 stored canonical source and rederives each synthetic resolver input, including
 imports, declarations, IDs, and spans. Checked reuse requires exact equality.
+The private snapshot inventories the full admitted workspace closure, including
+compiler-bundled standard-library modules and exact local dependency sources;
+the manifest's authored-source limit does not truncate that closure. Inventory
+paths remain sorted, unique, bounded by the workspace module limit, and checked
+against the manifest's authored and bundled paths before warm replay.
 It reruns HIR validation, cross-file/stub checks, linking, Project-profile
 admission, and graph generation, then requires exact stored project/workspace
 revisions and graph bytes. Every module must be a checked-HIR hit; unexpected

@@ -14,20 +14,21 @@ backend, negotiates HTTP/1.1 or HTTP/2, follows at most ten redirects, retains
 at most eight idle connections per origin, and publishes a response only when
 the complete body fits the caller's positive bound of at most 1 MiB.
 
-The response carries the status, negotiated protocol, final URL, headers sorted
-deterministically by lowercase name (stable, retaining receipt order and
-duplicate occurrences for the same name – e.g., ordered `Content-Encoding`
-codings and repeated `Set-Cookie` values remain separate and in received order),
-and body bytes. Construction and execution use one closed error vocabulary;
-transport error text and platform errors do not cross the API. Reusing the
-client reuses the underlying keep-alive pool. There is no global client and no
-compiler path constructs one implicitly.
+The response contains the status, negotiated protocol, final URL, headers, and
+body bytes. Headers are sorted deterministically by lowercase name. The sort
+is stable: duplicate names retain receipt order, so ordered `Content-Encoding`
+codings and repeated `Set-Cookie` values stay separate and in received order.
 
-The native socket provider separately accepts server-side TLS when an explicit
-host constructs `TcpNetworkProvider::with_tls_configs` with both client and
-server Rustls policies, then calls `accept_tls`. Accepted TLS streams use the
-same send, receive, close, and settlement paths as client streams. A provider
-without server policy fails before TLS acceptance with `AuthorityDenied`.
+Construction and execution share one closed error vocabulary. Transport error
+text and platform errors do not cross the API. Reusing a client reuses its
+keep-alive pool. There is no global client, and no compiler path creates one
+implicitly.
+
+Server-side TLS is a separate native socket-provider route. The host must
+construct `TcpNetworkProvider::with_tls_configs` with both client and server
+Rustls policies, then call `accept_tls`. Accepted streams use the same send,
+receive, close, and settlement paths as client streams. Without a server policy,
+the provider fails with `AuthorityDenied` before accepting TLS.
 
 Focused evidence covers redirect resolution, keep-alive reuse, declared
 and streamed body overflow, insecure URL rejection, authenticated client and

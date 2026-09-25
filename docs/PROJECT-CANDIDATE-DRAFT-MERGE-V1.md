@@ -8,11 +8,11 @@ separately gated.
 
 Audience: agent builders, embedding hosts and compiler contributors.
 
-Two unfinished sibling drafts can combine checked intention histories and
-compatible pending holes without releasing a completed candidate. The result
-retains the common original source base, so an eventual canonical source diff
-includes both histories. No placeholder source, unchecked HIR or inferred
-hole-completion state is introduced.
+Two unfinished sibling drafts can combine their checked histories and
+compatible pending holes without producing a completed candidate. They keep
+the common original source base, so the eventual canonical diff includes both
+histories. The merge creates no placeholder source or unchecked HIR and does
+not infer that a hole has been completed.
 
 ## API and checked history
 
@@ -28,9 +28,9 @@ is replayed once; the right suffix precedes the left suffix. Existing history
 conflicts, identity/dependency checks and complete canonical source replay remain
 unchanged. The combined history must fit the existing 32-intention limit.
 
-The merged checked candidate is used only as the internal source revision for
-pending-hole reconciliation. Each parent's selections are independently rebound
-onto it through the same private machinery as
+The merged checked candidate is only an internal source revision for reconciling
+pending holes. Each parent's selections are independently rebound to it using
+the same private machinery as
 [draft rebase](PROJECT-CANDIDATE-DRAFT-REBASE-V1.md). History is not reapplied onto
 the already merged source, and neither parent's history is discarded by making
 its final source an unrelated new base.

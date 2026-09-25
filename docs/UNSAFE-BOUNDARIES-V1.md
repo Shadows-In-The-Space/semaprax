@@ -8,9 +8,8 @@ the strength of this document plus `tests/projections/unsafe_boundaries.rs`.
 
 ## Objective
 
-This tranche adds the smallest end-to-end language slice proving ONLY unsafe
-boundary mechanics: an explicit, audited, graph-visible boundary around
-ordinary safe code. It is a boundary-mechanics slice, not a raw-memory slice:
+This tranche proves unsafe *boundary mechanics*: an explicit, audited,
+graph-visible boundary around safe code. It does not add raw memory access:
 
 - No raw pointers, address-of operations, dereferences, volatile access,
   atomics, or memory-layout operations are added. None exist in the language

@@ -11,27 +11,18 @@ implemented and are not claimed as done anywhere in this document.
 Audience: compiler contributors and reviewers of checked-fact-derived
 documentation and tooling.
 
-Architecture Claims v1 lets a caller state a bounded, whole-program
-invariant over one [`ProjectRevision`](../src/project/mod.rs)'s already
-checked HIR and get back a deterministic `held` / `violated` / `unevaluable`
-verdict with a minimal witness, rather than re-deriving the fact by reading
-source or by maintaining a second, hand-authored graph that can drift from
-what the compiler actually admitted.
-
-This is the first slice of [issue #205](https://github.com/wavect/semaprax/issues/205),
-"Derive bounded architecture claims from checked facts." It exists because
-this repository has repeatedly found documentation and evidence that claims
-something the code does not do; a claim language is only worth adding if a
-claim's supporting fact going stale makes the claim fail loudly, not keep
-reading true. This document states exactly which claim guarantee that
-applies to today.
+An architecture claim asks a question about the checked program, not about a
+diagram someone drew. For one exact [`ProjectRevision`](../src/project/mod.rs),
+the evaluator returns `held`, `violated`, or `unevaluable`, plus a small
+witness. It derives call edges from checked HIR on each evaluation, so a
+source change cannot leave a stale hand-authored graph looking valid. This is
+the first bounded slice of [issue #205](https://github.com/wavect/semaprax/issues/205).
 
 ## What is implemented
 
-One closed operator: `forbid_reaches(from, to)`. It asserts that the
-declaration named `from` can never reach the declaration named `to` through
-the *direct static call graph* retained in the exact `ProjectRevision`'s
-three HIR programs (entry, public API, test).
+Only `forbid_reaches(from, to)` exists today. It asks whether `from` can
+reach `to` through static calls in the exact revision's entry, public-API,
+and test HIR programs. It is not a general effect or authorization checker.
 
 The implementation is owned by [`src/architecture_claims.rs`](../src/architecture_claims.rs)
 and exported as `semaprax::architecture_claims`:

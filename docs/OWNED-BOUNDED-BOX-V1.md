@@ -8,10 +8,10 @@ The broader allocation model remains incomplete. The additive `Box<Bytes>`
 profile is implemented separately in [Owned Bounded Box v2](OWNED-BOUNDED-BOX-V2.md);
 this v1 document retains the scalar contract and compatibility claims that
 predate that extension.
-This document owns one compiler-provided uniquely owned allocation for Copy
-scalar payloads and the corresponding authenticated `std.mem` surface. It
-does not define a public aggregate ABI, allocator interface, region, arena, or
-shared-ownership model.
+
+This contract covers a compiler-provided, uniquely owned allocation for Copy
+scalars and its authenticated `std.mem` operations. It defines no public
+aggregate ABI, allocator interface, region, arena, or shared ownership.
 
 ## Exact profile
 

@@ -7,15 +7,14 @@ reuse is implemented in the separately versioned Persistent Semantic Cache v1.
 
 Audience: compiler contributors, embedding hosts, and semantic workspace agents.
 
-This opt-in invocation-owned cache retains compiler-checked module HIR alongside
-the source AST cache. A checked-module hit skips that module's `hir::resolve`
-call and clones its checked HIR. A changed module may also reuse exact
+This opt-in cache belongs to one invocation and keeps compiler-checked module
+HIR alongside source ASTs. A checked-module hit clones the HIR instead of
+calling that module's `hir::resolve`. A changed module may also reuse exact
 monomorphic free-function HIR when its complete non-body environment and every
 field of that function except its body remain equal. Both lanes rerun source
 verification, HIR validation, and the complete cross-file, import-stub,
-linking, graph, and Project-profile admission gates. This is bounded exact
-reuse, not a general incremental compiler or a proof that source edits preserve
-behavior.
+linking, graph, and Project-profile admission gates. This reuses exact facts within fixed bounds. It is not a general incremental
+compiler or proof that source edits preserve behavior.
 
 Project finalization reuses the exact retained source AST for source Agent
 extraction and prelude-bound source revision construction/replay. Each borrow

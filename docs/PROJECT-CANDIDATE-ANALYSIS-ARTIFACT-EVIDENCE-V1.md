@@ -10,7 +10,7 @@ Audience: agents and compiler contributors reviewing one admitted candidate and
 one selected pathless carrier before publication.
 
 This report composes the exact [candidate analysis coverage](PROJECT-CANDIDATE-ANALYSIS-COVERAGE-V1.md)
-inventory with a freshly and independently replayed [candidate artifact delta](PROJECT-CANDIDATE-ARTIFACT-DELTA-V1.md).
+inventory with a new, independently replayed [candidate artifact delta](PROJECT-CANDIDATE-ARTIFACT-DELTA-V1.md).
 It changes only the `generated_artifacts` boundary from `not_inspected` to
 `partial`. It does not turn pathless carrier evidence into generated-file
 provenance, materialization, deployment, execution or consumer evidence.
@@ -66,12 +66,11 @@ base and candidate revisions and compared using its owning report. Exact file
 paths, lengths and SHA256 values, carrier-envelope bindings, selected exports
 and authenticated source joins are evidence inside that projection.
 
-The partial row expressly records that only the selected kind was inspected,
-encoded file bodies are omitted from this composite, no filesystem
-materialization/install/deployment/runtime execution occurred, and facts
-outside the projection are not absence evidence. Zero selected files is not
-evidence that another artifact kind or deployed artifact is absent. Closing the
-boundary requires separately authorized materialization and deployment binding,
+The partial row records the limits: only the selected kind was inspected;
+encoded file bodies are omitted; and no files were materialized, installed,
+deployed, or run. Missing facts do not prove absence. Even zero selected files
+says nothing about other artifact kinds or deployed artifacts. Closing this
+gap requires separately authorized materialization and deployment binding,
 plus runtime and external-consumer conformance for the selected artifact.
 
 `generated_file_provenance` stays `not_inspected`: a generated-looking path or

@@ -13,11 +13,9 @@ successfully, while Node terminates with `SIGSEGV` (signal 11) and rustc exits
 with status 127. This is a hosted failure, not promotion evidence. See
 [Executions](#executions).
 
-Owning contract: [Linux production offline doctor provisioner
-v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md). This document adds the executable
-gate that contract's distribution and evidence section requires; it changes no
-admission rule, activates no ordinary CLI route, and promotes no completion
-row.
+The [Linux production provisioner contract](DOCTOR-PRODUCTION-PROVISIONER-V1.md)
+requires this distribution and evidence gate. The gate changes no admission
+rule, activates no ordinary CLI route, and promotes no completion row.
 
 ## Executions
 
@@ -389,8 +387,9 @@ Two `#[ignore]`d helper files in the doctor tree are deliberately excluded:
 private subprocess helpers selected by their own parent tests, not gates. So
 are the Windows revision-store and `owned_npm` symlink fixtures, which belong
 to separately tracked hosts. The Windows-only
-`doctor/windows_confinement/primitive/tests.rs` file is also excluded from this
-Linux gate's ignored-file inventory: its live cases belong to the separate
+`doctor/windows_confinement/primitive/tests.rs` and
+`doctor/windows_confinement/refusal/tests.rs` files are also excluded from this
+Linux gate's ignored-file inventory: their live cases belong to the separate
 exact-selector Windows confinement gate. It is `#[cfg(windows)]`, so this Linux
 libtest cannot execute those functions. Adding another ignored Linux doctor
 file still fails the untracked-file walk.

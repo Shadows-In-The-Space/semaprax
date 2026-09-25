@@ -8,12 +8,10 @@ modified.
 Audience: compiler contributors, agent-tool authors, and reviewers of
 concurrent multi-file semantic change and managed-Workspace publication.
 
-Owned Workflow Approval v1 answers two questions a Universal Semantic
-Transaction v2 Workflow leaves open when the underlying source moves between
-review and commit, or when a candidate is prepared but never independently
-signed off: is a workflow authored against one base still safe to apply once
-the live source has drifted, and can a candidate be published without a
-distinct approval act naming its exact digest.
+Owned Workflow Approval v1 handles source drift after review and separate
+approval before publication. It asks whether a workflow based on older source
+can still apply safely and requires an approval act naming the exact candidate
+digest before publication.
 
 ## Bounded scope and non-goal
 

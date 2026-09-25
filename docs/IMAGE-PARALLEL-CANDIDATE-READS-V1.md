@@ -5,12 +5,11 @@ See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 
 Audience: embedding hosts, agent builders and compiler contributors.
 
-The existing `VNextSession::handle_read_batch(frames, workers)` host API also
-accepts explicitly selected immutable candidate, draft and diagnostic reads.
-Parallel agents can inspect alternatives, pending work and rejected attempts
-without serializing every query or sending a mutable session into workers.
-Canonical source, ordinary method grants and separate publication authority
-remain unchanged.
+`VNextSession::handle_read_batch(frames, workers)` also accepts selected,
+immutable candidate, draft, and diagnostic reads. Agents can inspect alternatives,
+pending work, and rejected attempts in parallel without passing a mutable
+session to workers. Canonical source, method grants, and separate publication
+authority do not change.
 
 ## Selection and worker inputs
 

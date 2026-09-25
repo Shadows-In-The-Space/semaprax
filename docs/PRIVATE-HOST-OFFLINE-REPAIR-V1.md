@@ -4,16 +4,15 @@ Status: private-host offline repair vertical slice.
 
 Audience: compiler contributors and host integrators.
 
-`execution_revision::typed_repair` is a private-host composition over the
-checked source streaming and typed durable-effect routes. It does not add a
-source declaration, a `model.invoke` syntax form, a provider implementation,
-or a public CLI command.
+`execution_revision::typed_repair` combines checked source streaming with
+typed durable effects inside a private host. It adds no source declaration,
+`model.invoke` syntax, provider implementation, or public CLI command.
 
-The host fixes one retained project revision and one verified stable target.
-The checked proposal supplies an `i64` replacement value and selects a declared
-typed operation as its literal-kind enum. The host derives one bounded
-`replace_function_body` semantic change, opens an ephemeral candidate, and
-uses ordinary candidate admission. A malformed Boolean candidate retains the
+The host fixes a retained project revision and verified stable target. A
+checked proposal supplies an `i64` replacement and selects a declared typed
+operation by its literal-kind enum. The host derives a bounded
+`replace_function_body` change, opens an ephemeral candidate, and uses ordinary
+admission. A malformed Boolean candidate retains the
 actual candidate diagnostics at the host boundary and returns a nonzero stable
 diagnostic-code feedback scalar through the established effect result carrier.
 A later checked proposal can supply an I64 correction. The scalar preserves a

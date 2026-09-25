@@ -6,10 +6,10 @@ Status: implemented bounded query; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). No measured latency,
 memory, token savings, target execution, or full-product completion is implied.
 
-`ProjectSemanticImage::declaration_dependencies(expected_image, target)` returns
-a bounded source-derived report for a stable declaration identity. The schema
-is `semaprax.image-declaration-dependencies.v1`. Canonical `.spx` source remains
-authoritative; the index is disposable and never adds meaning to image JSON.
+Use `ProjectSemanticImage::declaration_dependencies(expected_image, target)`
+to find checked uses and callers of one stable declaration. It returns bounded
+`semaprax.image-declaration-dependencies.v1` data. Canonical `.spx` remains
+authoritative; its disposable index adds no meaning to image JSON.
 
 Each immutable image lazily retains one dependency index, including a failed
 construction result. Concurrent immutable queries share that initialization.

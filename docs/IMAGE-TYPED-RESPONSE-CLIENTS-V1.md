@@ -6,11 +6,11 @@ stack correction; **HOSTED GREEN** under the
 
 Audience: agent client authors, editor integrators and compiler contributors.
 
-The v5 `protocol/client` generator adds concrete response types for the schemas
-already owned by [Agent Discovery v5](IMAGE-AGENT-DISCOVERY-V5.md). This extends
-the same host-selected, I/O-free TypeScript, Python and Rust clients. It does
-not change a semantic method or grant a capability. The repair catalogue is
-now structurally described; other explicitly unbundled reports remain opaque.
+The v5 `protocol/client` generator adds response types for schemas owned by
+[Agent Discovery v5](IMAGE-AGENT-DISCOVERY-V5.md). The host-selected TypeScript,
+Python, and Rust clients remain I/O-free. No semantic method or capability
+changes. The repair catalogue has a structural type; explicitly unbundled
+reports remain opaque.
 
 ## Additive client API
 

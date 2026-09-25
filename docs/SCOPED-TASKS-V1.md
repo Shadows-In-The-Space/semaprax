@@ -10,20 +10,19 @@
 
 ## Summary
 
-This document fixes the bounded target-neutral model that a future
-structured-concurrency implementation must preserve. The repository contains
-`src/scoped_tasks.rs`, a deterministic proof-data model of scoped task
-execution: a bounded task DAG inside one strict scope tree, sequential
-scheduling in canonical stable-id order, sticky cancellation propagation,
+This target-neutral contract defines what structured-concurrency implementations
+must preserve. `src/scoped_tasks.rs` models scoped task execution as
+deterministic proof data: a bounded task DAG inside one strict scope tree,
+sequential scheduling in canonical stable-id order, sticky cancellation
+propagation,
 children-before-parents cleanup on scope exit in reverse completion order,
 first-failure stickiness with sibling draining, and closed per-task
 `Sendable`/`Shareable` annotations.
 
-The proof module deliberately contains no threads, no async runtime, no scheduler
-integration, no language syntax, no parser/HIR/Graph/backend changes, and no
-`Sendable` checking of real programs. Like the callable-v3 settlement model,
-everything it produces is evidence of what a conforming implementation MUST do,
-never authority to execute anything. Real closure execution is owned by
+This proof module has no threads, async runtime, scheduler integration, language
+syntax, parser/HIR/Graph/backend changes, or real-program `Sendable` checking.
+Like callable-v3 settlement, its output describes required behavior but grants
+no execution authority. Real closure execution belongs to
 [Structured Tasks Runtime v1](STRUCTURED-TASKS-RUNTIME-V1.md), including an
 invocation-owned HTTPS task whose provider must settle before result
 publication. A modeled task body here is still a closed scripted outcome

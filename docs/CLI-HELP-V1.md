@@ -14,9 +14,8 @@ later moved the exhaustive global page defined below to `semaprax help all`
 and made the global forms print a guided overview; the catalog and scoped-help
 contract here are unchanged.
 
-This additive command-help surface makes the closed CLI grammar inspectable
-without acquiring command authority. The help mechanism itself does not add an
-option, alias, target, plugin, or host capability. The later public
+Command help shows the closed CLI grammar without granting command authority.
+The help mechanism adds no option, alias, target, plugin, or host capability. The later public
 `project-scaffold` command is an additive catalog entry owned by [Public
 Project Scaffold Capsule v1](PROJECT-SCAFFOLD-V1.md).
 
@@ -33,10 +32,9 @@ The unpublished `semaprax-full` executable receives one explicit
 call a host hook, read a path, inspect the environment, search `PATH`, discover
 plugins, or probe a target.
 
-An unavailable private command is indistinguishable from an unknown command at
-the scoped-help boundary. Help text is documentation, not authority: ordinary
-dispatch still performs its existing parsing, authentication, and capability
-checks.
+Scoped help treats unavailable private commands exactly like unknown commands.
+Help documents commands; it does not authorize them. Ordinary dispatch still
+performs its parsing, authentication and capability checks.
 
 ## Closed forms
 
@@ -60,10 +58,10 @@ Usage:
   <canonical global usage line>
 ```
 
-Every global line for that command is included in its existing order. Thus a
-command with multiple canonical invocation shapes exposes multiple indented
-lines. Canonical names and already-dispatched aliases select the same entry;
-an alias does not invent another usage grammar.
+Scoped help includes every global usage line for the command in the same
+order. Commands with several canonical invocation shapes therefore show
+several indented lines. Canonical names and existing dispatch aliases select
+the same entry; an alias adds no separate grammar.
 
 No other placement is help. Extra operands, extra options, and embedded
 `--help` or `-h` reject with status two before command effects and the fixed

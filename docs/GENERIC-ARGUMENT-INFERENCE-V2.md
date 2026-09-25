@@ -12,11 +12,10 @@ passed. Interpreter, native O0/O2 and Core Wasm agreed, including evaluation-onc
 probes and contract-failure cleanup. These are historical local counts, not a
 new test run or the current evidence ceiling.
 
-This additive profile extends [v1](GENERIC-ARGUMENT-INFERENCE-V1.md) to complete
-ordered vectors for already admitted generic functions and additional expression
-type facts. A monomorphic caller may omit the whole vector; every declared type
-parameter must be determined by the argument types. Positions follow declaration
-order, never discovery order. Repeated observations must agree exactly.
+V2 extends [v1](GENERIC-ARGUMENT-INFERENCE-V1.md) to complete ordered vectors
+and more expression type facts. A monomorphic caller may omit the whole vector
+only when arguments determine every type parameter. Parameter positions follow
+declaration order, not discovery order; repeated evidence must agree exactly.
 
 Inference unifies whole formal and actual types. Nominal declaration identities
 and ordered nominal arguments must agree. Only parameters owned by the callee

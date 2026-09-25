@@ -178,6 +178,23 @@ impl NativeStageHost {
             .compiler
             .try_clone()
             .map_err(|_| invariant("native_executor.host.compiler_clone"))?;
+        let mut arguments = vec![
+            "-std=c11",
+            optimization,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-Wno-tautological-compare",
+            "-DSPX_NO_ENTRY_WRAPPER",
+            "native_executor.c",
+            "-o",
+            "native_executor",
+        ];
+        // The process provider supplies no PATH. On Linux, Clang must name
+        // the fixed system linker explicitly, as the native interop builder
+        // already does; otherwise its driver fails before testing the stage.
+        #[cfg(target_os = "linux")]
+        arguments.push("--ld-path=/usr/bin/ld");
         let output = run_held(
             compiler,
             directory
@@ -185,18 +202,7 @@ impl NativeStageHost {
                 .try_clone()
                 .map_err(|_| invariant("native_executor.probe_directory"))?,
             b"semaprax-stage-clang",
-            &[
-                "-std=c11",
-                optimization,
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                "-Wno-tautological-compare",
-                "-DSPX_NO_ENTRY_WRAPPER",
-                "native_executor.c",
-                "-o",
-                "native_executor",
-            ],
+            &arguments,
             15_000,
             4 * 1024,
             60 * 1024 - 32,

@@ -8,11 +8,10 @@ separately gated.
 
 Audience: agent client authors, editor integrators and compiler contributors.
 
-The v5 client generator provides additive structural types for complete selected
-request parameters, including recursively nested intentions, expressions and
-recovery objects. These types come from the existing compiler-owned schema
-bundle. They do not introduce another constructor grammar or replace compiler
-admission.
+The v5 client generator adds structural types for selected request parameters,
+including nested intentions, expressions, and recovery objects. It derives
+them from the compiler-owned schema bundle; it adds no constructor grammar and
+does not replace compiler admission.
 
 ## Additive API
 

@@ -1,7 +1,7 @@
 name: CI
 
-# Triggers are deliberately narrow: a push to `main`, or an explicit manual
-# dispatch. CI does not run on other branches and does not run on
+# Triggers are deliberately narrow: a push to `main`, a `v*` release tag, or
+# an explicit manual dispatch. CI does not run on other branches and does not run on
 # `pull_request`. This repository takes direct pushes to `main` from many
 # worktrees and agent sessions; running the full matrix on every intermediate
 # branch push spent runner capacity on refs nothing gates on. Branch protection
@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -34,11 +35,13 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
       CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
       CARGO_TARGET_DIR: target/agent-proposal-clients
     steps:
       - name: Allow Windows to check out long evidence paths
@@ -82,11 +85,15 @@ jobs:
   gen05b-generic-instance-closure:
     name: GEN-05B generic instance semantic closure
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # The exact inference and owned-result backend corpus exceeded 90 minutes
+    # on the v0.6.0 hosted runner; keep every check and allow its full run.
+    timeout-minutes: 360
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
       CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
       CARGO_TARGET_DIR: target/gen05b
       SEMAPRAX_REQUIRE_GENERIC_OWNED_BACKENDS: "1"
     steps:
@@ -726,11 +733,16 @@ jobs:
     # skipped kernel reported as a pass is exactly the false green that kept
     # this evidence local until now, and it is the reason the flag exists.
     runs-on: ubuntu-24.04
-    # The complete differential corpus outlasted the former 60-minute cap on
-    # ubuntu-24.04 even though its two cross-backend legs passed. Keep every
-    # corpus selector intact and allow the remaining interpreter legs to end.
-    timeout-minutes: 120
+    # The two v0.6.0 tag runs reached 120 and 240 minutes respectively while
+    # the same complete differential selector was still running. Keep every
+    # selector and sample intact, compile tests at modest optimization, and
+    # bound the lane at the hosted runner's six-hour job limit.
+    timeout-minutes: 360
     env:
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
       # Pinned by tag *and* by content digest. The tag alone is mutable.
       ELAN_RELEASE: v4.2.4
       ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
@@ -1290,12 +1302,15 @@ jobs:
 
   verify:
     name: Rust ${{ matrix.os }}
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       # Keep the test compiler inside the cache host's 256-MiB executable bound
       # and avoid linking debug symbols into every integration-test binary.
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -1739,10 +1754,13 @@ jobs:
 
   verify-tests:
     name: Rust tests ${{ matrix.os }} (${{ matrix.shard }})
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -1844,8 +1862,26 @@ jobs:
         run: cargo fetch --locked
       - name: Fetch the standalone owned-data Rust setup dependency closure
         run: cargo fetch --locked --manifest-path examples/owned-data-rust/Cargo.toml
+      - name: Fetch standalone lockfile-check dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          plan_args=(--plan-only)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            plan_args+=(--exclude-package semaprax-native-rust-interop)
+          fi
+          plan_json="$(python3 scripts/ci-msrv.py "${plan_args[@]}")"
+          if python3 -c 'import json,sys; p=json.load(sys.stdin); s=next(x for x in p["shards"] if x["name"]==sys.argv[1]); sys.exit(0 if any(t["name"]=="standalone_lockfiles" for t in s["targets"]) else 1)' '${{ matrix.shard }}' <<<"$plan_json"; then
+            cargo fetch --locked --manifest-path examples/calculator-rust/Cargo.toml
+            cargo fetch --locked --manifest-path examples/embedding-api/Cargo.toml
+            cargo fetch --locked --manifest-path platform-tests/component-runtime/Cargo.toml
+            cargo fetch --locked --manifest-path platform-tests/public-scalar-wit-interface/Cargo.toml
+          fi
       - name: Test the complete workspace target shard (Unix)
         if: runner.os != 'Windows'
+        env:
+          SEMAPRAX_REQUIRE_KERNEL_ZERO_RUNG_TWO_TARGETS: "1"
+          SEMAPRAX_REQUIRE_RESUMABLE_BACKENDS: "1"
         run: python3 scripts/ci-msrv.py --label "Rust $RUNNER_OS" --shard "${{ matrix.shard }}"
       - name: Test the complete workspace target shard without duplicate Windows native interop
         if: runner.os == 'Windows'
@@ -2194,15 +2230,16 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_TEST_OPT_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "1"
     name: Rust 1.88 minimum (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # The same sharded workspace command `verify-tests` runs, on an older
-    # toolchain that compiles it more slowly, so it gets the same budget. At 40
-    # minutes the `integration-1` shard was cut off mid-test on two runs while
-    # completing in about 35 on others: a budget that tight reports the runner's
-    # speed, not the shard's result. Mac/Windows runners are slower and need
-    # extra headroom (120) for the integration shards.
-    timeout-minutes: 240
+    # The same sharded workspace command `verify-tests` runs on an older
+    # toolchain. The v0.6.0 tag run reached four hours in several still-active
+    # shards, so both matrices use modest test optimization and the hosted
+    # six-hour job bound without dropping any target or assertion.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -2554,6 +2591,21 @@ jobs:
             --bundle dist/release-provenance.bundle \
             --check dist/release-signature-claim.json
           test -s dist/release-signature-claim.json
+      - name: Independently verify the signed release before publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="semaprax-$GITHUB_REF_NAME-x86_64-unknown-linux-gnu"
+          archive="dist/$package.tar.gz"
+          test -s "$archive"
+          test ! -e "$RUNNER_TEMP/semaprax-release-verify"
+          # Stream only the exact smoke-tested CLI member, never extract the
+          # archive's remaining paths into the publisher filesystem.
+          tar -xOzf "$archive" "$package/semaprax" > "$RUNNER_TEMP/semaprax-release-verify"
+          chmod 0500 "$RUNNER_TEMP/semaprax-release-verify"
+          root_digest="$(sha256sum dist/trusted_root.jsonl | cut -d ' ' -f1)"
+          "$RUNNER_TEMP/semaprax-release-verify" doctor verify-release dist \
+            --trusted-root-sha256 "$root_digest"
       - name: Publish the alpha archives only after complete aggregation
         env:
           GH_TOKEN: ${{ github.token }}

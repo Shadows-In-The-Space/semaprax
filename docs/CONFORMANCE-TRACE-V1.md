@@ -2,9 +2,9 @@
 
 Audience: integration tool authors and compiler contributors.
 
-Status: the public Rust data model, deterministic JSON projection, independent
-attached-plan replay, scenario-driven single-frame reference executor, and
-native scalar status/out execution are implemented. The narrow public
+Status: public Rust data, deterministic JSON, independent attached-plan replay,
+a scenario-driven single-frame reference executor, and native scalar status/out
+execution are implemented. The narrow public
 `semaprax.wasm-owned.v1` path emits compiler-generated semantic ordinals from
 real Node/Wasm control flow. The private generated-C lane now executes the same
 authoritative 14-case corpus through an exact loader lease, authority, ledger,

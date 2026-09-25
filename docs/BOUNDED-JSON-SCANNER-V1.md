@@ -28,18 +28,18 @@ the admission limits that shape them.
 SEMAPRAX admits no growable collection today: `Bytes` is uniquely owned and
 immutable, `[u8; N]` is fixed and Copy, and `Slice<u8>` is a non-escaping
 borrowed view ([Portable indexed byte data](PORTABLE-INDEXED-BYTE-DATA-V1.md)).
-A JSON *document* in the usual sense is a tree of owned nodes, so v1 does not
-build one. It instead answers questions about the caller's own bytes:
+A typical JSON document is a tree of owned nodes. V1 does not build that tree;
+it answers questions about the caller's bytes:
 
 - where does the JSON string token that starts here end?
 - where is the first byte that cannot be part of it?
 - is this whole byte range exactly one JSON string?
 - what code point does this `\uXXXX` escape denote?
 
-Every function takes `borrow Slice<u8>` and returns a Copy scalar. No value
-the scanner produces can outlive the source, because the scanner never
-produces a view: offsets are meaningful only against the exact slice that was
-passed in, and the language already prevents that slice from escaping.
+Every function takes `borrow Slice<u8>` and returns a Copy scalar, never a
+view. Returned offsets refer only to the exact input slice; they do not provide
+a view that can outlive the source. The language prevents the input slice from
+escaping.
 
 ## Result encoding
 
@@ -53,11 +53,10 @@ Locating functions return `usize`. Let `n` be `byte_len(input)`.
 `std.data.json.failure(input, offset)` builds the rejection value,
 `is_failure(input, r)` tests it, and `failure_offset(input, r, fallback)`
 decodes it, returning
-`fallback` for a success value so that it is total. The encoding is exact and
-allocation-free, and lets one scan carry both the answer and the diagnostic
-offset. Every package here produces and consumes exactly these values;
-`std.data.json` is the one that exports the three helpers, and a package that
-does not depend on it writes the same arithmetic inline. A rejection offset equal to `n` means the input ended early, so a
+`fallback` for a success value so that it is total. This exact, allocation-free encoding carries both the answer and diagnostic
+offset in one scan result. Every package here uses the same values.
+`std.data.json` exports the three helpers; packages without that dependency
+use the same arithmetic inline. A rejection offset equal to `n` means the input ended early, so a
 truncated string is never reported as a complete one.
 
 ## Lexical rules

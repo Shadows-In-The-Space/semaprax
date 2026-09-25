@@ -5,7 +5,7 @@ Status: implemented bounded compatibility-evidence projection; **HOSTED GREEN** 
 Public support and broader compatibility decisions remain separate.
 Audience: package tooling authors and compiler contributors.
 
-Exact base/candidate reports must be byte-identical to selected subjects in
+Base and candidate reports must be byte-identical to selected subjects in
 independently replayed Lock-v2 graphs. The closed scope is
 `stable_id_semantic_compatibility_only`: stable exports, recursive types,
 ownership, effects, exact ordered contracts, shared-base reachable nominal
@@ -13,13 +13,13 @@ definitions, and ternary targets. Findings are breaking, nonbreaking, or
 informational. Overall indeterminate has precedence over breaking.
 
 Unproven facts or targets, contract calls without callee closure, imported
-resource ABI closure, unknown facts, or an authenticated dependency/version/
-edge/capability/target/integrity context drift force indeterminate. Exact
-report/subject mismatch and source-association or integrity failure instead
-reject with `SPX-PC502` and produce no capsule. Source spelling and general
-consumer compatibility are nonclaims. Inputs, work, findings, render bytes,
-and output are strictly bounded. No package authority, resolution, fetch,
-build, execution, publication, or mutation is added.
+resource ABI closure, unknown facts, or authenticated context drift make the
+result indeterminate. The drift includes dependency, version, edge, capability,
+target, and integrity context. Exact report/subject mismatch or source-association
+or integrity failure instead rejects with `SPX-PC502` and no capsule. The report
+does not claim source-spelling or general consumer compatibility. Inputs, work,
+findings, render bytes, and output are bounded; it grants no package authority,
+resolution, fetch, build, execution, publication, or mutation.
 
 Work counters are deterministic logical traversal/source-byte units, not
 allocator-byte or wall-clock measurements.

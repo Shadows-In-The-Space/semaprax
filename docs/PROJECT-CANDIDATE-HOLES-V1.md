@@ -10,9 +10,9 @@ separately gated.
 
 `ProjectCandidateDraft` holds an immutable private last-valid
 `Arc<ProjectCandidate>` and a bounded map of pending typed body intentions.
-There is no placeholder AST, invalid HIR, source edit, disk cache, or hidden
-compilation state. A pending hole says that the selected function body remains
-to be supplied; it does not pretend that the old body is the intended new body.
+It contains no placeholder AST, invalid HIR, source edit, disk cache, or hidden
+compilation state. A pending hole means the selected function still needs a
+body; the old body is not treated as the intended replacement.
 
 ## API and lifecycle
 
@@ -46,9 +46,10 @@ existing `replace_function_body` Semantic Change, and invokes the ordinary
 Candidate apply path. That path materializes canonical source privately,
 reparses and rebuilds the entire Project, revalidates ownership/loans/cleanup,
 checks mandatory identity/contract/effect/profile constraints, and preserves
-previously admitted bounded core targets. These are compiler admission steps,
-not project-test or target-runtime execution. Constructor and admission
-failures preserve the original draft and return their existing diagnostics.
+previously admitted bounded core targets. These checks admit code to the
+compiler; they do not run project tests or target code. Constructor and
+admission failures leave the original draft intact and keep their existing
+diagnostics.
 
 A successful fill removes only that hole. Other holes remain unresolved over
 the new last-valid revision, and their old draft-bound selectors become stale.

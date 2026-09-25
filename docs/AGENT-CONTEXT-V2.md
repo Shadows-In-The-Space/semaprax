@@ -1,10 +1,11 @@
 # Agent Context v2
 
-Audience: agent and tool authors, plus compiler contributors.
+Audience: agent and tool authors; compiler contributors.
 
-Status: implemented additive semantic-query contract. V1 remains the default
-and retains its exact API, CLI behavior, and bytes. Supplying an explicit
-direction selects v2:
+Use v2 when you need callers, callees, or both. V1 stays the default and keeps
+its exact API, CLI behavior, and bytes; an explicit direction selects v2.
+
+Status: implemented additive semantic-query contract.
 
 ```text
 semaprax context <file|project> <symbol|stable-id>
@@ -13,7 +14,7 @@ semaprax context <file|project> <symbol|stable-id>
   [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]
 ```
 
-Selecting a Project directory or its `semaprax.toml` authenticates the whole
+For a Project, select its directory or `semaprax.toml`. This authenticates the whole
 declared source set and emits `semaprax.project-agent-context.v1`, a compact
 projection of the existing `semaprax.project-semantic-context.v1` result from
 its retained typed cross-file index. The exact Project and graph revisions are

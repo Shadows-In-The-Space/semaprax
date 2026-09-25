@@ -7,9 +7,9 @@ source/HIR/graph/cache replay, ProgramRoot, interpreter, C11 O0/O2 and Core Wasm
 Audience: language users, compiler contributors, backend implementers, and
 workspace-service authors.
 
-This additive profile extends [Closures v1](CLOSURES-V1.md) to construction
-inside private generic collection functions and bounded loop bodies. It keeps
-the same scalar snapshot semantics and private callable representation.
+This extends [Closures v1](CLOSURES-V1.md) to private generic collection
+functions and bounded loop bodies, with the same scalar snapshots and private
+callable representation.
 
 ## Generic construction
 

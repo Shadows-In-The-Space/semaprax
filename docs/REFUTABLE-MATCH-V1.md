@@ -10,10 +10,9 @@ alone.
 
 ## Objective
 
-SEMAPRAX matching previously admitted only exhaustive copy-variant matches
-and irrefutable Copy-record destructuring. This tranche adds the smallest
-refutable slice that keeps every cleanup, ownership, and backend invariant
-intact:
+Earlier matching supported exhaustive Copy-variant matches and irrefutable
+Copy-record destructuring. This tranche adds bounded refutable arms without
+changing cleanup, ownership, or backend rules:
 
 ```text
 match <scalar> {

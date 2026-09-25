@@ -28,17 +28,17 @@ The typed expression grammar adds one immutable scoped binding:
 }
 ```
 
-The object is closed to `kind`, `name`, `value`, and `body`. Both expressions
-use the same recursive typed constructor grammar. The compiler builds an
-ordinary block containing one immutable `let` statement and the body as its
-tail expression. It infers the binding's type through normal verification.
-No new source syntax, explicit type parser, mutable local, assignment, raw AST,
-or unresolved-hole form is introduced.
+Only `kind`, `name`, `value`, and `body` are accepted. Both expressions use the
+same recursive typed constructor grammar. The compiler builds an ordinary
+block: one immutable `let` statement followed by the body as the tail
+expression. Normal verification infers the binding's type. This adds no source
+syntax, explicit type parser, mutable local, assignment, raw AST, or
+unresolved-hole form.
 
 The initializer occupies exactly one AST position before the body. Reusing a
-Copy local avoids duplicating the initializer expression. This structural fact
-does not permit duplicating an owned value: ordinary ownership admission still
-rejects use after move, repeated consumption, or invalid borrow escape.
+Copy local avoids duplicating the initializer expression. This does not allow an owned value to be duplicated. Ordinary ownership
+admission still rejects use after move, repeated consumption, or invalid borrow
+escape.
 
 ## Lexical scope and hygiene
 

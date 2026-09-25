@@ -2,6 +2,7 @@
 //! decode this into a cache; source admission remains the ordinary build path.
 use super::*;
 use crate::cache_codec::{self, codec_struct};
+use std::collections::BTreeSet;
 
 struct Snapshot {
     context: String,
@@ -54,9 +55,63 @@ fn manifest(context: &str) -> Result<ProjectManifest> {
     Ok(manifest)
 }
 
+fn check_source_inventory(manifest: &ProjectManifest, paths: &[&str]) -> Result<()> {
+    if !(2..=MAX_PROJECT_FRONTEND_CACHE_MODULES).contains(&paths.len()) {
+        return Err(capacity(
+            "semantic snapshot source inventory exceeds its bound",
+        ));
+    }
+    let mut expected = manifest.sources().iter().cloned().collect::<BTreeSet<_>>();
+    let mut bundled = Vec::new();
+    super::super::standard_dependencies::extend_sources(manifest, &mut bundled)?;
+    expected.extend(bundled.into_iter().map(|source| source.path));
+    let mut previous = None;
+    let mut external = 0usize;
+    for path in paths {
+        if previous.is_some_and(|last| last >= *path) {
+            return Err(invalid(
+                "semantic snapshot source inventory is not canonical",
+            ));
+        }
+        previous = Some(*path);
+        if !expected.remove(*path) {
+            if !is_external_dependency_path(path) {
+                return Err(invalid(
+                    "semantic snapshot source inventory disagrees with its manifest",
+                ));
+            }
+            external += 1;
+        }
+    }
+    if !expected.is_empty() || external != manifest.dependency_sources().len() {
+        return Err(invalid(
+            "semantic snapshot source inventory disagrees with its manifest",
+        ));
+    }
+    Ok(())
+}
+
+fn is_external_dependency_path(path: &str) -> bool {
+    let Some((prefix, suffix)) = path
+        .strip_prefix("dependencies/")
+        .and_then(|rest| rest.split_once('/'))
+    else {
+        return false;
+    };
+    let Some(suffix) = suffix.strip_suffix(".spx") else {
+        return false;
+    };
+    prefix.len() == 32
+        && suffix.len() == 32
+        && prefix
+            .bytes()
+            .chain(suffix.bytes())
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 pub(crate) fn encode_snapshot(cache: &ProjectFrontendCache) -> Result<Vec<u8>> {
     if !cache.semantic
-        || !(2..=MAX_SOURCES).contains(&cache.entries.len())
+        || !(2..=MAX_PROJECT_FRONTEND_CACHE_MODULES).contains(&cache.entries.len())
         || cache.entries.keys().ne(cache.checked.keys())
     {
         return Err(invalid(
@@ -64,6 +119,10 @@ pub(crate) fn encode_snapshot(cache: &ProjectFrontendCache) -> Result<Vec<u8>> {
         ));
     }
     let manifest = manifest(&cache.context)?;
+    check_source_inventory(
+        &manifest,
+        &cache.entries.keys().map(String::as_str).collect::<Vec<_>>(),
+    )?;
     let sources = cache
         .entries
         .iter()
@@ -101,20 +160,25 @@ pub(crate) fn encode_snapshot(cache: &ProjectFrontendCache) -> Result<Vec<u8>> {
 pub(crate) fn decode_snapshot(bytes: &[u8]) -> Result<ProjectFrontendCache> {
     let snapshot: Snapshot = cache_codec::decode(bytes)?;
     let manifest = manifest(&snapshot.context)?;
-    if !(2..=MAX_SOURCES).contains(&snapshot.entries.len())
-        || snapshot.entries.len() != manifest.sources().len()
-        || snapshot.graph_json.len() > 16 * 1024 * 1024
-    {
+    if snapshot.graph_json.len() > 16 * 1024 * 1024 {
         return Err(capacity(
             "semantic snapshot inventory or graph exceeds its bound",
         ));
     }
+    check_source_inventory(
+        &manifest,
+        &snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>(),
+    )?;
     let mut cache = ProjectFrontendCache::new_with_semantic_cache();
     cache.context = snapshot.context;
     let mut source_bytes = 0usize;
     let mut sources = Vec::new();
-    for (entry, expected_path) in snapshot.entries.into_iter().zip(manifest.sources()) {
-        if &entry.path != expected_path || entry.path.len() > MAX_PATH_BYTES {
+    for entry in snapshot.entries {
+        if entry.path.len() > MAX_PATH_BYTES {
             return Err(invalid(
                 "semantic snapshot source inventory disagrees with its manifest",
             ));

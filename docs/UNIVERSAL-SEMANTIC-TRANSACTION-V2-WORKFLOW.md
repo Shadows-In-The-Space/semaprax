@@ -12,11 +12,10 @@ already-closed [Universal Semantic Transaction v2](UNIVERSAL-SEMANTIC-TRANSACTIO
 `ReplaceExpression` operations into one multi-file feature change. It adds no
 second editing route, transaction kernel, or patch-application path: each step
 is validated by the exact, unmodified `SemanticTransactionV2::validate` core.
-The only new behavior is sequencing — step N is validated against the exact
-`ProjectRevision` step N-1 produced, so a real multi-file feature (for example,
-editing one function's body in one source file and a caller's body in another)
-ends in one immutable, reviewable `ProjectCandidate` instead of N unrelated
-candidates.
+The only addition is sequencing: step N is validated against the exact
+`ProjectRevision` produced by step N-1. A multi-file change, such as editing a
+function and a caller in another file, therefore produces one immutable,
+reviewable `ProjectCandidate`, not N unrelated candidates.
 
 The implementation is owned by `src/project/semantic_transaction_v2_workflow.rs`
 and exports:
@@ -57,12 +56,11 @@ Otherwise, for each step in order:
    failing step's index and target, diagnostic codes unchanged) and produces
    no `SemanticTransactionV2Workflow` value at all.
 
-Because expression identities are revision-scoped, a caller cannot accidentally
-carry a stale identity or old-source slice computed against an earlier base
-into a later step: the reused v2 core reselects and re-verifies both against
-the fresh candidate the previous step actually built, and rejects a mismatch
-with the existing `SPX-G527` stale diagnostic rather than silently matching a
-different expression that happens to share an identity string.
+Expression identities belong to a revision. At each step, the v2 core
+reselects and verifies both the identity and old-source slice against the
+candidate produced by the previous step. Stale values from an earlier base
+fail with `SPX-G527`; an identical identity string cannot silently select a
+different expression.
 
 ## What one successful workflow proves
 
@@ -73,8 +71,7 @@ comparing the shared original base to that final candidate — the same
 structural-diff core Composition v1 uses for rebase and merge, not a second
 diff representation. `to_json()` additionally lists every step's own
 transaction digest, target, edited source path, and full `impact`/`result`
-values, so the workflow's canonical bytes are independently reviewable without
-re-running any step.
+values, so reviewers can inspect the canonical workflow bytes without rerunning steps.
 
 Because every step's own preservation guarantees compose transitively, a
 source file untouched by every step in the workflow is byte-identical to the

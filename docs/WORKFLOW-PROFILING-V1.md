@@ -4,10 +4,9 @@ Status: **experimental, opt-in benchmark instrumentation**.
 
 Audience: compiler contributors and performance operators.
 
-Workflow profiling records bounded timing observations around selected compiler,
-project, and prepared-interpreter stages. It is a diagnostic aid for local
-performance investigation. It is not a language feature, a semantic profile,
-or an authorization mechanism.
+Workflow profiling times selected compiler, Project, and prepared-interpreter
+stages within bounds. It helps local performance investigations; it is neither
+a language feature, semantic profile, nor authorization mechanism.
 
 ## Enabling the observer
 

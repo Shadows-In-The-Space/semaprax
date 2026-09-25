@@ -4,15 +4,13 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax simd-report <file.spx>` is a deterministic, read-only projection
-that performs a static vectorization-eligibility analysis of one verified
-module. It is the first executable slice of the completion-matrix row "SIMD
-and GPU" under Compiler and output targets. The analysis is derived
-exclusively from the real resolved HIR nodes (`hir::resolve` over the verified
-program) of admitted explicit-ID monomorphic effect-free scalar functions. It
-emits no SIMD codegen or intrinsics, emits no SPIR-V/WebGPU/GPU kernels,
-makes no autovectorization claim about any backend, executes no target, and
-changes no source.
+`semaprax simd-report <file.spx>` analyzes static vectorization eligibility
+for one verified module. This deterministic read-only report is the first
+executable slice of the Compiler-and-output "SIMD and GPU" row. It uses only
+resolved HIR (`hir::resolve`) for admitted explicit-ID monomorphic effect-free
+scalar functions. It emits no SIMD codegen or intrinsics and no
+SPIR-V/WebGPU/GPU kernels. It claims no backend
+autovectorization, executes no target, and changes no source.
 
 ## Command
 

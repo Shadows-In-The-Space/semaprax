@@ -18,11 +18,11 @@ contract.
 v3](PROJECT-SCAFFOLD-V3.md) template beside `calculator` and `library`: a
 small multi-user task-tracking service that composes two bundled
 standard-library decision layers instead of defining every function locally.
-It exists so a newcomer who wants to see a `[dependencies]`-carrying project
-work end to end does not have to hand-write one; `semaprax new --template
-service <destination>` and `semaprax project-scaffold --name <name> --template
-service --layout tables` both derive it from the same compiled-in bytes as the
-other two templates, with no filesystem, network, or process authority.
+Newcomers can try an end-to-end project with `[dependencies]` without writing
+one first. `semaprax new --template service <destination>` and
+`semaprax project-scaffold --name <name> --template service --layout tables`
+derive it from the same compiled-in bytes as the other templates. Derivation
+grants no filesystem, network, or process authority.
 
 ## Command
 
@@ -31,10 +31,9 @@ semaprax new <destination> [--name project-name] [--template calculator|library|
 semaprax project-scaffold --name <name> [--template calculator|library|service] [--layout frozen|tables]
 ```
 
-The service template only derives under the table manifest layout. Its
-`semaprax.toml` declares a `[dependencies]` table, and the frozen
-`semaprax.project.v1` layout that `--layout frozen` (the default for
-`project-scaffold`) emits has no such table to put it in, so
+The service template requires the table manifest layout because it declares
+`[dependencies]`. The frozen `semaprax.project.v1` layout emitted by
+`--layout frozen` (the `project-scaffold` default) has no dependency table, so
 `derive_project_scaffold_v1_with_layout(name, "service", ScaffoldLayout::Frozen)`
 returns `SPX-J115` before rendering anything, rather than silently dropping
 the dependencies. `semaprax new` is unaffected: both CLI binaries always

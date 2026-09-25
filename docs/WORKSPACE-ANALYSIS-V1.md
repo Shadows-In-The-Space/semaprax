@@ -4,12 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Workspace Analysis v1 defines deterministic, read-only Context, Impact, and
-Review artifacts over one authenticated Workspace Semantic Graph v1. The three
-artifacts operate only on the six admitted cross-file edge families and retain
-typed module, declaration, and capability namespaces. A module bridge node is
-never selectable and is never conflated with a declaration that has the same
-string spelling.
+Workspace Analysis v1 provides deterministic, read-only Context, Impact, and
+Review reports for one authenticated Workspace Semantic Graph v1. They use only
+the six admitted cross-file edge families. Modules, declarations, and
+capabilities stay in separate typed namespaces: a module bridge node cannot be
+selected or mistaken for a declaration with the same spelling.
 
 ## Public API
 
@@ -95,18 +94,20 @@ Typed endpoints are:
 | `effect_requirement` | declaration | capability |
 | `capability_authority` | module | capability |
 
-The implementation independently rebuilds and exact-compares these endpoints,
-paths, namespaces, and adjacency indexes before BFS. Context uses minimum-depth
-forward, reverse, or bidirectional BFS. `reached_by` is an array in canonical
+Before traversal, the implementation independently rebuilds these endpoints,
+paths, namespaces, and adjacency indexes and checks for exact equality. Context
+uses breadth-first search (BFS) to find minimum-depth paths in the forward,
+reverse, or both directions. `reached_by` is an array in canonical
 `root,forward,reverse` enum order. Only the root carries `root`; tied forward
 and reverse paths may emit both direction values.
 Context emits each authenticated compatible edge once by Workspace edge index
 when both endpoints are emitted.
 
-Impact is reverse-only potential structural dependency closure. It emits only
-minimum-path dependency edges. Affected roles are `target`, `consumer`,
-`module_consumer`, and `dependency`; reasons are unique contributing edge
-families in the frozen family order. These are not behavioral-change claims.
+Impact follows dependencies in reverse to find potentially affected structural
+dependents. It emits only minimum-path dependency edges. Affected roles are
+`target`, `consumer`, `module_consumer`, and `dependency`; reasons list unique
+contributing edge families in their frozen order. These facts do not establish
+that behavior changed.
 
 Nodes are selected and emitted in `(minimum_depth,node_key)` order. Node-key
 order is module, then declaration ordered by declaration kind and ID, then
@@ -292,11 +293,12 @@ Each then appends the same exact ordered eleven strings:
 
 ## Authority and evidence status
 
-Each operation validates scalar grammar before locking, holds one shared
-semantic-workspace authority through the retained graph build, traversal,
-canonical render, final held-object/inventory check, and checked unlock, and
-returns only owned JSON. Raw analysis and authority cannot escape. There is no
-write, stage, publish, apply, backend, runtime, parser, or verifier authority.
+Each operation checks scalar grammar before locking. It holds one shared
+semantic-workspace authority while building the retained graph, traversing it,
+rendering canonical output, checking held objects and inventory, and performing
+a checked unlock. Only owned JSON is returned; raw analysis and authority
+cannot escape. No write, stage, publish, apply, backend, runtime, parser, or
+verifier authority is granted.
 
 Local traversal, wire, digest, cap, mutation, API/CLI, and preservation gates
 are present. The frozen whole-document raw SHA-256 KATs are:

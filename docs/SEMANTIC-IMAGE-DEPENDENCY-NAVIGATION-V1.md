@@ -7,14 +7,13 @@ Status: implemented bounded navigation; **HOSTED GREEN** under the
 savings, latency improvement, target execution and full-product completion
 remain separate claims.
 
-Dependency navigation provides a summary followed by selected detail pages over
-the existing [immutable-image index](SEMANTIC-IMAGE-DEPENDENCIES-V1.md). An agent
-can inspect counts and expand only the relationships needed for its decision,
-without receiving or reconstructing the complete dependency report.
+Start with a count summary, then request only the detail pages you need from
+the [immutable-image index](SEMANTIC-IMAGE-DEPENDENCIES-V1.md). This avoids
+transferring or rebuilding the full dependency report.
 
-Canonical `.spx` remains authoritative. Navigation adds neither graph meaning
-nor a second HIR scan. The existing full dependency report, candidate delta
-relationship projection, Image v1 bytes and image identity remain unchanged.
+Canonical `.spx` remains authoritative. Navigation adds no graph meaning or
+second HIR scan, and does not change the full report, candidate delta
+projection, Image v1 bytes, or image identity.
 
 ## Library API
 

@@ -19,10 +19,10 @@ authorization, effect dispatch, reduce, and terminal selection. The private
 `opencode_host::source::OpenCodeProposalSource` owns only context encoding and
 the explicit OpenCode transport callback. Its `OpenCodeSourceAccounting`
 reserves through the existing `InvocationBudgetHook` and retains in-memory
-receipts; those receipts are not a checkpoint. A durable source driver must
-own the causal event order and replay cursor. The host adapter may prepare an
-attempt and perform its physical call only when that driver has acknowledged
-the durable intent. No host receipt or journal entry can grant authority.
+receipts; those receipts are not a checkpoint. The durable source driver must own causal event order and the replay cursor.
+Only after it acknowledges the durable intent may the host adapter prepare an
+attempt and make the physical call. Host receipts and journal entries grant
+no authority.
 
 The generic `live_invocation::journal` v1 validator admits exactly one
 `RequestIntent`/response pair per turn. The source route admits up to four
@@ -32,9 +32,9 @@ current `run_live` has no journal or recovery parameter, and
 a live `ProposalSource`. Therefore the generic v1 wire and validator must
 remain byte-for-byte unchanged. Source mode needs a **separately tagged,
 versioned phase grammar in the same causal-journal family**, with one source
-run as its owner. It must not be implemented by pretending each source
-attempt is a generic kernel turn, by storing an independent budget counter,
-or by keeping a parallel effect log that can disagree with the source run.
+run as its owner. A source attempt must not be represented as a generic kernel turn. Do not add
+an independent budget counter or a parallel effect log that can disagree with
+the source run.
 
 The source mode reuses the caller-owned
 `agent_lifecycle::durable::CheckpointStore` contract: a generation commit
@@ -66,11 +66,11 @@ domain-separated canonical encoding of:
 - the exact ProgramRoot when the bound source execution has one (an explicit
   absent tag otherwise, never a substituted root).
 
-The canonical seed contains no model response, observed usage, session ID,
-credential, or journal generation. Raw task bytes are inputs to the identity
-hash; the persisted envelope need store only the resulting digest. A change
-to any bind-time field is a different invocation and must be refused before
-dispatch when presented with the prior checkpoint. The existing
+The canonical seed excludes model responses, observed usage, session IDs,
+credentials and journal generations. Raw task bytes feed the identity hash,
+but the persisted envelope needs only the digest. Changing any bind-time field
+creates a different invocation. If paired with the prior checkpoint, it must
+be rejected before dispatch. The existing
 `agent_lifecycle::iterative::live_invocation_digest` does not bind source
 revision or deployment, and generic `LiveInvocationSeed` does not bind an
 absolute deadline; neither is sufficient as this source identity unchanged.

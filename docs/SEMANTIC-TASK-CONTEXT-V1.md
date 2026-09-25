@@ -7,11 +7,10 @@ queries into one budgeted bundle, plus compiler contributors working on issue
 #197 ("Add goal-aware, model-token-budgeted semantic context compilation")
 and its dependency #85 (benchmark methodology).
 
-Semantic Task Context v1 (`../src/semantic_task_context.rs`) compiles one
-`semaprax.semantic-task-context.v1` bundle from an explicit multi-seed
-**goal**, under an explicit **token** budget, by composing the existing
-single-seed `crate::graph::agent_context_v2_json` engine rather than
-reimplementing any of its closure rules.
+Task Context combines several explicit goal seeds into one bounded
+`semaprax.semantic-task-context.v1` bundle. It uses the existing single-seed
+`crate::graph::agent_context_v2_json` engine under a caller-supplied token
+budget; it does not reimplement that engine's closure rules.
 
 ## What already existed before this module
 

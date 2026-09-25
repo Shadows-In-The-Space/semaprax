@@ -8,11 +8,10 @@ separately gated.
 
 Audience: compiler contributors and agents reviewing generated package changes.
 
-This additive report compares actual pathless Web, npm, OpenAPI or C carriers from a
-candidate's original base and final admitted Project revision. It connects
-candidate review to emitted file bindings and manifest-selected export
-identities. It does not infer installed consumers, package compatibility or
-runtime behavior from those facts.
+This report compares the actual pathless Web, npm, OpenAPI or C carriers for a
+candidate's original base and final admitted Project revision. Reviewers can
+see emitted file bindings and manifest-selected exports, but cannot infer
+installed consumers, package compatibility or runtime behavior from them.
 
 ## API and replay
 
@@ -55,9 +54,9 @@ not a claim that their callable interfaces are compatible.
 Files are compared by their union of carrier-relative paths. Every file row
 retains before/after facts, including unchanged files. Absence is explicit.
 Byte equality compares actual file lengths and SHA256 bindings; carrier metadata
-equality is separate. A carrier revision can change even when particular file
-contents remain identical. File path ordering is deterministic and does not
-change the order or content of the underlying carrier.
+equality is separate. A carrier revision can change while individual files stay
+identical. Report paths have deterministic order; this does not reorder or
+change the carrier.
 
 Exports are compared by persistent declaration identity and retain their exact
 source facts. Display names or source paths do not substitute for stable IDs.

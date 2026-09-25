@@ -3,10 +3,9 @@
 Status: private Rust embedding profile for password hashing and session service; local evidence, no network or production deployment claim.
 Audience: host integrators and compiler contributors implementing authenticated embedding.
 
-This Rust embedding profile adds actual password hashing and authenticated
-sessions alongside the pure `std.auth` predicates specified in
-[Authentication and Sessions v1](AUTHENTICATION-SESSIONS-V1.md).
-It adds no source-language operation or ambient compiler authority.
+This Rust embedding adds password hashing and authenticated sessions beside the
+pure `std.auth` predicates in [Authentication and Sessions v1](AUTHENTICATION-SESSIONS-V1.md).
+It adds no source operation or ambient compiler authority.
 
 The host explicitly supplies entropy, signing key, clock ticks and storage.
 `SecretBytes` has redacted debug output, no serialization or clone traits,
@@ -18,8 +17,8 @@ storage) with the redaction assertion (the marker is absent from every byte
 window of the rendered `Debug` output), rather than checking only a fixed
 positive string.
 
-Reference in-memory stores provide bounded process-local storage; they do
-not claim database durability, distributed transactions, HTTP middleware,
+Reference stores are bounded and process-local; they do not claim database
+durability, distributed transactions, HTTP middleware,
 rate limiting, or production deployment support.
 
 ## Signed session service

@@ -1,15 +1,17 @@
 # Agent task comparison runner v1
 
-Status: implemented execution adapter and deterministic fixture-mode
-demonstration. No comparative model observations. The paid 18-trial paired
-pilot (task x available-lane x repetition) is
-[issue #105](https://github.com/wavect/semaprax/issues/105) and is not run
-by this contract.
+Audience: benchmark operators and comparison reviewers.
 
-Audience: benchmark operators and reviewers of the [Agent Task Comparison
-v1](AGENT-TASK-COMPARISON-V1.md) contracts.
+This adapter runs one selected task, available lane, and trial, then records
+typed evidence. Its checked-in demonstration uses deterministic fixtures, not
+real coding-agent trials or comparative model observations.
 
-This closes the execution-adapter gap
+Status: implemented execution adapter and fixture-mode demonstration. The
+paid 18-trial paired pilot is [issue #105](https://github.com/wavect/semaprax/issues/105),
+outside this contract. See [Agent Task Comparison v1](AGENT-TASK-COMPARISON-V1.md)
+for the task and lane rules.
+
+It closes the execution-adapter gap
 [issue #104](https://github.com/wavect/semaprax/issues/104) identifies:
 `scripts/agent-task-comparison.py` validates and summarizes externally
 supplied evidence but does not itself run anything. This contract adds

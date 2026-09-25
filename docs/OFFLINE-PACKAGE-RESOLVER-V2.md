@@ -6,13 +6,13 @@ The generated package surface remains unpublished and unpromoted.
 
 Audience: package-tool authors and compiler contributors.
 
-Resolver v2 deterministically selects Subject-v3 packages from a complete,
-caller-owned finite offline catalog. Roots and transitive dependencies use the
-same closed exact/tilde/caret range grammar. Search selects the byte-lowest
-unresolved identity and tries numeric versions in descending order. Every
-constraint occurrence remains tagged and intersected; branch selection,
-constraints, edges, and depth roll back together while decision/work charges
-remain cumulative. The first complete graph wins.
+Resolver v2 selects Subject-v3 packages from a complete, finite, caller-owned
+offline catalog. Roots and dependencies use the same closed exact/tilde/caret
+range grammar. Search chooses the byte-lowest unresolved identity, then tries
+numeric versions from highest to lowest. Every constraint occurrence is tagged
+and intersected. Branch selection, constraints, edges, and depth roll back
+together; decision and work charges remain cumulative. The first complete
+graph wins.
 
 The successful selected set is passed once through Lock-v3 generation and
 exact verification. Evidence embeds that exact lock and binds canonical roots,

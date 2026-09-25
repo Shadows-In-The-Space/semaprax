@@ -8,12 +8,11 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
-Portable Indexed Byte Data v1 is the first bounded Useful Data profile. It
-adds one target-independent index scalar, fixed byte arrays, uniquely owned
-byte buffers, non-escaping borrowed byte slices, and total indexed reads. It
-extends the existing checked scalar, ownership, explicit-mutation, bounded
-`while`, owned-`string`, and borrowed-`str` semantics; it does not create a
-parallel evaluator, ownership system, cleanup authority, or project builder.
+This first bounded Useful Data profile adds a target-independent index scalar,
+fixed byte arrays, uniquely owned buffers, non-escaping borrowed slices, and
+total indexed reads. It builds on checked scalars, ownership, explicit mutation,
+bounded `while`, owned `string`, and borrowed `str`. It adds no parallel
+evaluator, ownership system, cleanup authority, or project builder.
 
 ## Source contract
 

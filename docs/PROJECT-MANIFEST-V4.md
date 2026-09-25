@@ -6,6 +6,10 @@ Status: implemented bounded profile; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). Registry publication and
 broader production support remain separate, so the mature-product claim is Partial.
 
+Project v4 packages a bounded byte-search command for a fixed Node adapter.
+The adapter supplies input and writes the command's successful output; this
+is not a general process-I/O profile.
+
 ## Closed profile
 
 Project v4 is additive: v1-v3 canonical bytes and behavior are unchanged. Its
@@ -45,8 +49,8 @@ The npm build uses the independently replayed
 6. `semaprax.command.js`
 7. `package.json`
 
-The fixed Node adapter snapshots one UTF-8 argument and stdin bytes into one
-combined 65,536-byte budget. The command may write only a selected external
+The fixed Node adapter copies one UTF-8 argument and stdin bytes into a
+combined 65,536-byte input budget. The command may write only a selected external
 Slice parameter or its immutable alias; local arrays, owned data, and helper
 writes are rejected. Wasm records only that stable scratch pointer/length and
 copies bytes into the transcript page after semantic success. The adapter then

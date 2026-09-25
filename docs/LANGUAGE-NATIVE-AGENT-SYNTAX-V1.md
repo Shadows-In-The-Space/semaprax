@@ -8,7 +8,7 @@ broader product completion remain separately gated.
 
 Audience: language users, compiler contributors, and Agent-system reviewers.
 
-One declaration has this closed shape:
+An admitted declaration has this closed shape:
 
 ```semaprax
 @id("example.agent")
@@ -47,21 +47,17 @@ agent Example {
 }
 ```
 
-All thirteen identities are explicit and locally unique. Type roles and
-operations occur exactly once in the displayed order. Plain `fn` means
-`deterministic`; only `propose` is `model fn`, and only `execute` is `effect
-fn`. The decoded `canonical_json` string is bounded by the AgentDefinition v1
-maximum of 1,310,720 bytes. The canonical formatter uses ordinary SEMAPRAX
-string escaping and never changes the decoded bytes.
+All thirteen IDs are explicit and locally unique. Roles occur once in this
+order. Plain `fn` is `deterministic`; only `propose` is `model fn` and only
+`execute` is `effect fn`. Decoded `canonical_json` is capped at 1,310,720
+bytes; formatting escapes the source string without changing decoded bytes.
 
 The parser diagnostic `SPX-P124` owns missing identities, duplicate local
 identities, wrong role order/names, a non-string compatibility value, and an
 over-bound compatibility value. Ordinary missing-token diagnostics remain
 `SPX-P104`/`SPX-P106`.
 
-The AST retains exact stable IDs, closed role/kind enums, decoded runtime JSON,
-and source spans. The following semantic tranche must validate stable-ID
-collisions project-wide, construct canonical AgentDefinition v1 JSON, and
-admit it through the existing AgentDefinition compiler. This frontend tranche
-does not claim valid runtime JSON, HIR integration, graph population,
-execution, provider/tool authority, or backend support.
+The AST retains exact IDs, closed role/kind enums, decoded runtime JSON, and
+spans. Later semantics must check project-wide ID collisions, build canonical
+AgentDefinition v1 JSON, and re-admit it. This syntax slice claims no runtime
+JSON validation, HIR/graph integration, execution, authority, or backend support.

@@ -13,6 +13,8 @@ pub(crate) enum NativeOutputProfile {
     Legacy,
     OwnedDataProvider,
     OwnedUtf8Provider,
+    /// Private checked Bytes body with a bridge-owned invocation reservation.
+    ReservedBytesProvider,
     StdoutTranscript,
     UsefulDataCommand,
     LanguageCommandIo,
@@ -41,6 +43,7 @@ pub(super) struct StringRuntimeSelection {
     pub(super) length_delimited: bool,
     pub(super) provider_carriers: bool,
     pub(super) include_instances: bool,
+    pub(super) reserved_bytes: bool,
 }
 
 impl StringRuntimeSelection {
@@ -48,10 +51,28 @@ impl StringRuntimeSelection {
         length_delimited: false,
         provider_carriers: false,
         include_instances: false,
+        reserved_bytes: false,
     };
 }
 
 impl NativeOutputProfile {
+    pub(super) const fn byte_allocator(
+        self,
+        op: crate::byte_ops::ByteOp,
+    ) -> (&'static str, &'static str) {
+        match (self, op) {
+            (Self::ReservedBytesProvider, crate::byte_ops::ByteOp::Copy) => {
+                ("spx_bytes_copy_in", "spx_ctx, ")
+            }
+            (Self::ReservedBytesProvider, crate::byte_ops::ByteOp::Zeroed) => {
+                ("spx_bytes_zeroed_in", "spx_ctx, ")
+            }
+            (_, crate::byte_ops::ByteOp::Copy) => ("spx_bytes_copy", ""),
+            (_, crate::byte_ops::ByteOp::Zeroed) => ("spx_bytes_zeroed", ""),
+            _ => unreachable!(),
+        }
+    }
+
     pub(super) const fn string_runtime(self) -> StringRuntimeSelection {
         match self {
             Self::Legacy | Self::StdoutTranscript | Self::OwnedDataProvider => {
@@ -59,12 +80,20 @@ impl NativeOutputProfile {
                     length_delimited: true,
                     provider_carriers: false,
                     include_instances: true,
+                    reserved_bytes: false,
                 }
             }
             Self::OwnedUtf8Provider => StringRuntimeSelection {
                 length_delimited: true,
                 provider_carriers: true,
                 include_instances: false,
+                reserved_bytes: false,
+            },
+            Self::ReservedBytesProvider => StringRuntimeSelection {
+                length_delimited: true,
+                provider_carriers: true,
+                include_instances: false,
+                reserved_bytes: true,
             },
             Self::UsefulDataCommand
             | Self::LanguageCommandIo
@@ -87,7 +116,7 @@ impl NativeOutputProfile {
     }
 
     pub(super) fn tracks_strings(self, function: &ResolvedFunction) -> bool {
-        self == Self::OwnedUtf8Provider
+        matches!(self, Self::OwnedUtf8Provider | Self::ReservedBytesProvider)
             || (self.tracks_present_strings() && function_uses_strings(function))
     }
 

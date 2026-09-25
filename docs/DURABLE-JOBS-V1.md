@@ -16,15 +16,12 @@ provider, clock, concurrency, and scheduler limits.
 ## Objective
 
 [Database Access v1](DATABASE-ACCESS-V1.md) established the pattern this
-tranche follows: specify the pure, checked decision procedures a domain needs
-before any host authority is involved, execute them on every backend, and let
-a separate Rust-only fixture prove the model composes into something a real
-engine could implement. A durable job queue is exactly where "at-least-once
-delivery" stops being a slogan and starts being a set of exact states a caller
-must be able to distinguish: a job that ran and succeeded, a job that will run
-again, a job that is refused forever, and — the case competing systems most
-often paper over — a job whose last attempt may or may not have taken effect
-before the worker lost contact with it.
+profile follows: define pure, checked decisions before introducing host
+authority, run them on every backend, and use a separate Rust-only fixture to
+show how the model could compose into an engine. A durable job queue must
+distinguish success, retry, permanent refusal and uncertainty. In the uncertain
+case, the worker lost contact before learning whether its last attempt took
+effect.
 
 `std.jobs` models six things as closed, checked, deterministic computations:
 
@@ -43,10 +40,10 @@ before the worker lost contact with it.
 6. **Delivery uncertainty.** An explicit `UNCERTAIN` resting state and its
    reconciliation, bounded by whether the handler is declared idempotent.
 
-Everything above is scalar arithmetic, boolean logic, and byte-slice
-comparison. None of it opens a socket, starts a thread, reads a clock, or
-reads a file, so none of it needs an effect, a `permit`, or a provider; the
-profile is `useful-data.v1`, the same one `std.db` uses.
+These operations use scalar arithmetic, boolean logic and byte-slice comparison.
+They open no sockets, start no threads and read no clocks or files, so they
+need no effect, `permit` or provider. The profile is `useful-data.v1`, as used
+by `std.db`.
 
 ## Job states
 

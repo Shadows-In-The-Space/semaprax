@@ -7,11 +7,10 @@ redaction, and billing reconciliation") and reviewers of the receipt/audit
 boundary this document adds around
 [Live Invocation Contract v1](LIVE-INVOCATION-CONTRACT-V1.md).
 
-This document assumes the reader already knows Live Invocation Contract v1:
-the causal journal's record format and ordering rules
-(`src/live_invocation/journal.rs`), and the `model.invoke` effect boundary
-(`src/live_invocation/model_invoke.rs`). Everything below is additive to that
-contract, not a restatement or a second copy of it.
+Read Live Invocation Contract v1 first for journal format and order
+(`src/live_invocation/journal.rs`) and the `model.invoke` boundary
+(`src/live_invocation/model_invoke.rs`). This document adds receipt and audit
+rules; it does not replace the invocation contract.
 
 ## What already existed at the audit baseline
 

@@ -8,10 +8,10 @@ Audience: agent authors, compiler contributors, and embedding hosts.
 
 ## Purpose
 
-An exact-image function reference intentionally becomes stale after a semantic
-candidate changes the Project. Agents still need a conservative way to ask
-whether the same explicit stable function identity survives in that candidate
-without falling back to names, spans, paths, or unchecked graph data.
+A function reference bound to an exact image becomes stale when a semantic
+candidate changes the Project. Rebinding checks whether the same explicit
+stable function identity survives, without guessing from names, spans, paths,
+or unchecked graph data.
 
 `ProjectCandidate::rebind_function_reference` accepts the exact candidate
 digest and one canonical reference exported from that candidate's exact base
@@ -36,8 +36,9 @@ binds:
 The nested report either rejects with its closed stage/reason or returns a
 fresh exact destination reference for the same unique explicit stable function
 identity. It distinguishes unchanged, changed, and moved source provenance.
-Stable identity survival does not prove unchanged signature, contracts, body,
-behavior, compatibility, ancestry, external-consumer migration, or approval.
+A surviving stable identity does not prove that the signature, contracts, body,
+or behavior stayed unchanged. Nor does it prove compatibility, ancestry,
+external-consumer migration, or approval.
 
 The operation mutates neither candidate nor source, retains no image, invokes
 no execution or filesystem path, and grants no source, retention, approval, or

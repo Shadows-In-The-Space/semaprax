@@ -7,12 +7,11 @@ This facts object does not itself complete SEG-02 or replace ProgramRoot v2.
 Audience: compiler contributors, semantic-service implementers, and reviewers
 of source-owned ProgramRoot facts.
 
-`InterfaceArtifactFacts` is an authority-free, canonical bundle over one exact
-admitted `ProjectRevision`. It is designed for private retention by a future
-enriched canonical workspace and for a new, versioned ProgramRoot segment
-inventory. It is deliberately absent from Canonical Semantic Workspace
-Revision v1 and ProgramRoot v1, so their bytes, identities, nine nodes, and
-fixed segment order remain unchanged.
+`InterfaceArtifactFacts` records the checked source interface and selected
+generated-artifact reports for one exact `ProjectRevision`. It is data, not
+permission to build or publish. A future workspace and ProgramRoot version may
+retain it; Canonical Semantic Workspace Revision v1 and ProgramRoot v1 do not.
+Their bytes, identities, nine nodes, and segment order stay unchanged.
 
 ## Inputs and derivation
 

@@ -9,9 +9,9 @@ separately gated.
 Audience: agent builders, compiler contributors, and reviewers.
 
 This additive intention shape extends [Project Candidates and Semantic Change
-IR v1](PROJECT-CANDIDATES-V1.md). Canonical source remains authoritative; an
-intention constructs candidate ASTs and cannot publish source, supply trusted
-HIR, or bypass the complete Project verifier. Existing `append_parameters`
+IR v1](PROJECT-CANDIDATES-V1.md). Canonical source remains authoritative. An intention constructs candidate
+ASTs; it cannot publish source, supply trusted HIR, or skip the complete Project
+verifier. Existing `append_parameters`
 requests, canonical bytes, argument treatment, and limits remain unchanged.
 
 ## Ordered parameter mapping
@@ -44,10 +44,9 @@ Each element has exactly one of these shapes:
 | `{"name":"new_name","type":"scalar","argument":literal}` | Add a fresh by-value scalar parameter and supply the explicit matching scalar literal at every migrated call. |
 | `{"name":"new_name","type":type_selector,"argument_expression":expression}` | Compute a new scalar or checked Copy nominal argument from the original staged parameters after all original arguments, then fully revalidate each migrated caller. See [Argument Expressions v1](PROJECT-SIGNATURE-ARGUMENT-EXPRESSIONS-V1.md). |
 
-A retained parameter can appear only once. Original parameters omitted from
-the array are removed from the declaration, but their caller argument
-expressions are still evaluated. An empty array therefore removes every
-Copy parameter while preserving argument evaluation at existing calls. Every
+A retained parameter can appear only once. Omitting an original parameter removes it from the declaration, but its caller
+argument expression still runs. An empty array therefore removes every Copy
+parameter without skipping argument evaluation at existing calls. Every
 owning or borrowed parameter must be retained exactly once; it cannot be
 removed or copied.
 

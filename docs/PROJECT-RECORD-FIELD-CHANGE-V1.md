@@ -8,11 +8,11 @@ broader product completion remain separately gated.
 
 Audience: compiler contributors and agents editing immutable Project candidates.
 
-`add_record_field` appends one explicitly identified scalar or bounded owning
-`string`/`Bytes` field to an existing record and derives the admitted authored
-constructor and exact-pattern changes.
-Canonical `.spx` remains authoritative. This operation introduces no syntax,
-backend exception, arbitrary source edit, graph mutation, or publication power.
+Use `add_record_field` to append one explicitly identified scalar or bounded
+owning `string`/`Bytes` field to an existing record. The compiler derives the
+admitted changes to authored constructors and exact patterns. Canonical `.spx`
+remains authoritative. This adds no syntax, backend exception, arbitrary source
+edit, graph mutation, or publication power.
 
 ## Closed request
 
@@ -66,9 +66,8 @@ HIR. Eligibility uses the compiler's checked type facts for sized,
 resource-free records, including both Copy records and records with owned
 cleanup. Empty records are allowed. Already-admitted String, Bytes, array and
 nested record/variant storage need not match the flat owned-byte pattern
-profile merely to receive an inert scalar field. The selected record's exact
-dependency closure must still have compiler-derived type facts; display names
-never establish Copy or ownership facts.
+profile merely to receive an inert scalar field. The record's exact dependency closure still needs compiler-derived type facts.
+Display names cannot establish Copy or ownership facts.
 
 For an unused record, eligibility reconstructs only its selected nominal
 dependency closure from the retained checked declarations and compiler prelude.

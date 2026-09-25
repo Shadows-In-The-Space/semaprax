@@ -14,8 +14,8 @@ not a new test run or the current evidence ceiling.
 
 ## Semantic scope
 
-This GEN-06 tranche admits explicit generic functions whose owning parameter
-and result are the same authenticated compiler-owned `Result<Bytes, E>`.
+GEN-06 admits explicit generic functions whose owning parameter and result
+share the authenticated compiler-owned `Result<Bytes, E>` type.
 `E` is one declaration-owned type parameter, explicitly instantiated as any
 of the eight Copy scalars (`i64`, `i32`, `u8`, `usize`, `char`, `f32`, `f64`,
 `bool`) or `Bytes`. This is a real substitution in the residual carrier, not
@@ -30,19 +30,21 @@ fn propagate<E>(value: own Result<Bytes, E>) -> Result<Bytes, E> {
 }
 ```
 
-The result type of `?` is owned `Bytes`; the operand and residual are the
-same concrete Result type. On `Ok`, the operation moves the selected payload
-into the success expression. On `Err`, it transfers the complete selected
-carrier into the provisional function result. A Copy-scalar error has no
-owned payload, but still has an authenticated case tag and residual value.
-The absence of owned flags must never erase the error or authorize an `Ok`
-payload. `Bytes` errors retain their guarded owned payload.
+Here, `?` produces owned `Bytes`. Its operand and residual have the same
+concrete Result type. On `Ok`, it moves the selected payload into the success
+expression. On `Err`, it transfers the complete selected carrier into the
+provisional function result.
 
-Requires and ensures retain the ordinary checked contract semantics. Failure
-selection remains sticky; cleanup settles before result publication. Repeated
-invocation must not retain allocations from success, residual return, or
-contract failure. Live unrelated owners across `?` remain subject to the
-existing ownership rule until a separately implemented extension admits them.
+A Copy-scalar error has no owned payload, but it still has an authenticated
+case tag and residual value. Missing owned flags must never erase that error
+or authorize access to an `Ok` payload. A `Bytes` error keeps its guarded
+owned payload.
+
+Requires and ensures use the ordinary checked contract rules. Once selected,
+a failure cannot be replaced; cleanup finishes before result publication.
+Repeated calls must retain no allocations from success, residual return, or
+contract failure. The existing ownership rule still applies to unrelated
+owners live across `?`; widening it requires a separate implemented extension.
 
 ## Copy success and owned error
 

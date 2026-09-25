@@ -18,12 +18,11 @@ of exact source-owned ProgramRoot identity.
 3. one exact `InterfaceArtifactFacts` v1 bundle; and
 4. one exact `ProgramRootDependencyLockAssociation` v1.
 
-The manifest separately records `semantic_workspace_root_digest`, the
-ProgramRoot v1 derived from the possibly agent-enriched semantic workspace.
-The base and semantic-workspace roots are distinct anchor roles, but their
-digests may coincide when default Project derivation already contains
-source-owned Agent definitions. Their typed inputs must name the same legacy
-Project revision. The association must
+The manifest also records `semantic_workspace_root_digest` for ProgramRoot v1
+derived from the possibly agent-enriched workspace. Base and workspace roots
+have different roles, though their digests may match when default Project
+derivation already contains source-owned Agent definitions. Both typed inputs
+must name the same legacy Project revision. The association must
 name the exact supplied base root and its canonical workspace revision.
 
 The v2 identity is SHA-256 over the canonical manifest without

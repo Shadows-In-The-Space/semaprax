@@ -10,11 +10,11 @@ Audience: toolchain maintainers, trusted provisioners and security reviewers.
 
 ## Live handoff, not reply-file admission
 
-The private `semaprax-doctor-collector` executable joins the existing
-[worker](DOCTOR-OFFLINE-WORKER-V1.md) to the toolchain's ordinary doctor version
-and report policy. It is a separate provisioner-owned entry, not a new ambient
-discovery path in `semaprax-full doctor`. Neither an arbitrary reply file nor a
-nonce, digest, environment flag or pidfd alone grants profile authority.
+The private `semaprax-doctor-collector` connects the
+[worker](DOCTOR-OFFLINE-WORKER-V1.md) to the toolchain's doctor version and
+report policy. The provisioner owns this entry; `semaprax-full doctor` does not
+discover it. A reply file, nonce, digest, environment flag, or pidfd alone
+cannot grant profile authority.
 
 The trusted provisioner starts exactly one immutable worker with the agreed
 sealed request/bundle and exclusive capture pipes, then execs into the collector,

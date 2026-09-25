@@ -9,10 +9,9 @@ broader product completion remain separately gated.
 Audience: CLI users, coding agents, release engineers, and compiler
 contributors.
 
-This additive revision replaces the exhaustive global help page with a guided
-one-screen overview and moves the exhaustive catalog behind one new admitted
-form, `semaprax help all`. It preserves the v1 catalog, the v1 scoped-help
-bytes, the v2 typo behavior, and the v3 recovery hint.
+V4 makes global help a guided one-screen overview. Use `semaprax help all`
+for the exhaustive catalog. The v1 catalog and scoped-help bytes, v2 typo
+behavior and v3 recovery hint stay unchanged.
 
 ## Why
 
@@ -46,16 +45,15 @@ static, source-owned guide:
 Every entry names a catalog command by its canonical name, and the capability
 filter is the catalog's: `source-live` is private to `semaprax-full` and
 appears only in its exhaustive catalog and scoped help. The standalone
-executable also omits the `rust` build target. A group with no visible entry
-is omitted. The guided page for either capability class is at
-most 2048 bytes; that bound is a contract, enforced by unit and integration
-evidence, so the page stays one screen as commands are added.
+executable also omits the `rust` build target. Groups with no visible entries are omitted. For either capability class, the
+guided page is limited to 2048 bytes. Unit and integration evidence enforce
+that contract so the page stays one screen as commands are added.
 
-Guided shapes are summaries, not grammar. The catalog's usage lines remain the
-single grammar authority: scoped help renders separate source and project
-`build` shapes so their target catalogs do not imply capabilities the input
-class lacks. Those shapes also expose `--json` and the `--output` spelling.
-A guided shape must not be parsed as an admission rule.
+Guided shapes summarize commands; they do not define accepted grammar. The
+catalog's usage lines remain authoritative. Scoped help shows separate source
+and project `build` shapes so their targets do not imply unsupported input
+capabilities. Those shapes also show `--json` and the `--output` spelling.
+Do not parse a guided shape as an admission rule.
 
 ## Exhaustive catalog
 

@@ -4,13 +4,12 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Workspace Semantic Graph v1 is a bounded, canonical, read-only projection of
-one authenticated Semantic Workspace v1 generation. It validates the complete
-managed set before selecting an entry closure. The projection contains the
-entry module plus transitive provider modules reached only through explicit
-direct `use function` and `use type` edges. It excludes reverse consumers,
-disconnected modules, implicit imports, reexports, stubs, and synthetic main
-declarations.
+Workspace Semantic Graph v1 is a bounded, canonical, read-only view of one
+authenticated Semantic Workspace v1 generation. It checks the complete managed
+set before selecting the entry closure: the entry module and its transitive
+providers, reached only through explicit direct `use function` and `use type`
+edges. Reverse consumers, disconnected modules, implicit imports, reexports,
+stubs, and synthetic main declarations are excluded.
 
 ## Public API and command
 
@@ -107,10 +106,10 @@ input is:
 domain || u64_le(payload_byte_length) || payload
 ```
 
-`payload` is the exact compact top object with only `graph_digest` omitted and
-with final fixed-point `used_output_bytes` already present. A fixed-width digest
-placeholder establishes the final size; the implementation hashes once,
-inserts the digest, rerenders, and exact-compares length and typed binding.
+`payload` is the exact compact top object without `graph_digest`, but with the
+final fixed-point `used_output_bytes`. A fixed-width digest placeholder sets
+the final size. The implementation then hashes once, inserts the digest,
+renders again, and checks the exact length and typed binding.
 
 ## Limits and budget
 
@@ -168,11 +167,11 @@ a variant construction five, and `Try` eight. Before the split, every source
 byte and every expression were charged at the `Try` and string rates, and a
 4.9 KiB module of twenty scalar functions exhausted the budget.
 
-The pre-bound is a refusal that runs before linking; it is not the only
-enforcement. The pre-bound and the structures the core build actually retains
-are reserved against the same `builder_bytes` budget, and an overflow of
-either is `SPX-G171`, so a looser pre-bound refuses earlier and a tighter one
-refuses later, without either removing the retained-memory bound.
+The pre-bound can reject a build before linking, but it is not the only check.
+Both the estimate and the structures actually retained by the core build are
+reserved against the same `builder_bytes` budget. Either overflow produces
+`SPX-G171`. A looser estimate rejects earlier and a tighter one later; neither
+removes the retained-memory bound.
 
 The legacy estimate uses the longest authored identity in the whole workspace.
 If that estimate would exceed the builder limit, an additive fallback repeats
@@ -332,11 +331,12 @@ The exact `nonclaims` array is:
 
 ## Authority and evidence status
 
-Snapshot holds one shared semantic-workspace lock across authenticated snapshot
-acquisition, the one retained unified build, projection, rendering, final held
-object/inventory recheck, and checked unlock. No raw graph or authority escapes.
-The module exposes no parser, verifier, source constructor, write, stage,
-`ACTIVE` pivot, backend, or runtime authority.
+Snapshot holds one shared semantic-workspace lock while acquiring the
+authenticated snapshot, performing the retained unified build, projecting and
+rendering the graph, rechecking held objects and inventory, and performing a
+checked unlock. No raw graph or authority escapes. The module exposes no
+parser, verifier, source constructor, write, stage, `ACTIVE` pivot, backend, or
+runtime authority.
 
 Local canonical-wire, digest, mutation, cap, API/CLI, and preservation gates are
 present. The internal literal whole-document fixture pins raw SHA-256

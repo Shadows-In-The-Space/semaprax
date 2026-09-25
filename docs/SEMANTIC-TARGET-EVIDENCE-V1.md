@@ -4,13 +4,13 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-Semantic Target Evidence v1 is a bounded, read-only projection of one admitted
-single-file Semantic Patch v1/v2 operation set or the sole canonical Patch v3
-identity rebase. It independently rebuilds exact base and candidate Graph JSON,
-the compiler-derived capability manifest, production native C11 source, and a
-structurally validated production Wasm core module. It reports digests, lengths,
-and closed classifications; it does not execute a target or discover project
-tests, and it grants no authority.
+Target Evidence previews one admitted single-file Patch v1/v2 operation set or
+the sole canonical Patch v3 identity rebase. It independently rebuilds exact
+base and candidate Graph JSON, the compiler-derived capability manifest,
+production native C11 source, and a structurally validated production Core
+Wasm module. It reports digests, lengths, and
+closed classifications; it does not run a target, find Project tests, or grant
+authority.
 
 The authored ordinary native [String cleanup](NATIVE-INLINE-STRING-SETTLEMENT-V1.md)
 and [String contents corrections](NATIVE-STRING-CONTENTS-V1.md)

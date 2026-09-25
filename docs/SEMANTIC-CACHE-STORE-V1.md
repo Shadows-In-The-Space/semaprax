@@ -6,11 +6,11 @@ The protected-key and immutable-static-installation preconditions remain mandato
 
 Audience: trusted compiler hosts, cache integrators, and compiler maintainers.
 
-This additive store retains compiler-created checked-module cache state across
-processes. It authenticates the complete selected payload **before** entering
-the private HIR decoder. It is separate from source-backed candidate archives,
-Project Revision Store entries, semantic images, Git publication, and the
-existing cold/AST-only/in-process semantic cache constructors.
+This store reuses compiler-created checked-module state across processes. It
+authenticates the entire selected payload **before** private HIR decoding.
+It is not a candidate archive, Project Revision Store entry, semantic image,
+Git publication route, or replacement for cold, AST-only, and in-process
+caches.
 
 ## Trust contract
 

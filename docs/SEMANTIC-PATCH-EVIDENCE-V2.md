@@ -4,11 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-Semantic Patch Evidence v2 additively binds the unchanged Semantic Review v1
-facts and complete supporting evidence to one independently rebuilt Semantic
-Target Evidence v1 report. It remains a bounded single-file proof carrier:
-exact replay proves only the frozen capsule bindings, not execution, safety,
-compatibility, provenance, approval, or authority.
+Evidence v2 adds an independently rebuilt [Target Evidence v1](SEMANTIC-TARGET-EVIDENCE-V1.md)
+report to unchanged Semantic Review v1 facts and complete supporting evidence.
+It is still a bounded single-file capsule: exact replay checks only its frozen
+bindings, not execution, safety, compatibility, provenance, approval, or
+authority.
 
 The authored ordinary native [String cleanup](NATIVE-INLINE-STRING-SETTLEMENT-V1.md)
 and [String contents corrections](NATIVE-STRING-CONTENTS-V1.md)

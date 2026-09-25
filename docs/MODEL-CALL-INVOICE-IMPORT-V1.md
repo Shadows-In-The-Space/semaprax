@@ -5,10 +5,10 @@ is an evidence boundary and grants no network, model, tool, payment or signing
 authority. Imported observations are not proof of semantic correctness.
 Audience: compiler contributors and invoice import integrators.
 
-`model_call_receipt::invoice_import` accepts raw input through
-`RetainedInvoiceBytes` (at most 65,536 bytes) and independently retained
-`InvoiceImportExpectation` account, call and adapter identities (each nonempty,
-at most 4096 UTF-8 bytes). Constructors bound borrowed input before copying.
+`model_call_receipt::invoice_import` takes up to 65,536 raw bytes through
+`RetainedInvoiceBytes` and separately retained account, call, and adapter
+identities through `InvoiceImportExpectation`. Each identity is nonempty and
+at most 4096 UTF-8 bytes. Constructors bound borrowed input before copying.
 `import_invoice_row` checks the verifier identity, invokes the explicitly
 supplied `InvoiceImportVerifier` on the exact retained bytes, then independently
 checks returned account/call identities, label bounds and nonnegative cost.

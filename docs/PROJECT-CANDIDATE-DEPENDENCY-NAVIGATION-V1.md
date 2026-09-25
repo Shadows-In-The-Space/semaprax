@@ -8,11 +8,10 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-Candidate dependency navigation exposes the existing four compact dependency
-views over the exact fully admitted revision of one immutable candidate. It
-lets an agent inspect declarations introduced or changed by candidate history
-without registering a semantic image or accepting a base-image handle as proof
-about candidate source.
+Candidate dependency navigation provides four compact dependency views of one
+exact, fully admitted immutable candidate revision. Agents can inspect new or
+changed declarations without registering a semantic image. A base-image handle
+is not accepted as proof about candidate source.
 
 Canonical `.spx` remains authoritative. Every request authenticates the exact
 candidate digest, derives the candidate image from its retained checked
@@ -34,8 +33,8 @@ cursor, options)` returns
 Both reports retain the candidate image navigation fields and add exact
 `candidate_revision` and `base_project_revision` bindings. `project_revision`,
 `workspace_revision`, `image_digest`, source revisions and source digests refer
-to the admitted candidate revision. The base revision is an ancestry fact; its
-image, handles, pages and source facts are not silently substituted.
+to the admitted candidate revision. The base revision records ancestry only;
+its image, handles, pages and source facts cannot stand in for candidate facts.
 
 The four views preserve the existing collector and ordering:
 

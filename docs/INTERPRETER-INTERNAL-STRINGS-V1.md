@@ -8,19 +8,23 @@ broader product completion remain separately gated.
 
 Audience: language users, compiler contributors, and conformance reviewers.
 
+Use `interpret-strings` only when internal callees take or return an owned
+`string`. The selected external function still has the ordinary scalar
+boundary. This is a separate opt-in report and command; ordinary `interpret`
+keeps its behavior and rejects these callees with `SPX-F102`.
+
 ## Explicit entry point
 
 ```sh
 semaprax interpret-strings <file> --function <name|stable-id> [--arg literal]... [--max-bytes N]
 ```
 
-The additive library module is `semaprax::interpreter::internal_strings`, with
-`interpret`, `verify_envelope`, and `verify_envelope_against_source` functions
-using the same signatures as their [ordinary interpreter](INTERPRETER-V1.md)
-counterparts. `InterpreterOptions` and `Interpretation` are reused unchanged.
-The command shares the existing option parser and exit-code convention:
-returned value is 0, language/capacity failure is 1, and usage failure is 2.
-The API returns no terminal LF; the CLI appends one.
+The `semaprax::interpreter::internal_strings` library module offers
+`interpret`, `verify_envelope`, and `verify_envelope_against_source` with the
+same signatures as the [ordinary interpreter](INTERPRETER-V1.md). It reuses
+`InterpreterOptions`, `Interpretation`, and option parsing. Exit status is 0
+for a returned value, 1 for language/capacity failure, and 2 for usage error.
+The API returns no final LF; the CLI adds one.
 
 The existing `interpret` command/API, source-report verifier, Project entry and
 test execution, prepared Project interpreter, source traces, stdout, command,

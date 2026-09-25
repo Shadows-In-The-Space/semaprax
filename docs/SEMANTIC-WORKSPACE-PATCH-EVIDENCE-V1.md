@@ -4,15 +4,13 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Semantic Workspace Patch Evidence v1 is the bounded proof carrier for one
-admitted [Semantic Workspace Transaction
-v1](SEMANTIC-WORKSPACE-TRANSACTION-V1.md). It independently rebuilds the exact
-workspace preview and, for every changed path, the existing Semantic Review v1
-and Semantic Patch Evidence v1 facts. A separate apply route requires exact
-typed and byte replay before any candidate generation or staging object is
-created. Here, “proof” means only that closed deterministic replay contract; it
-does not mean signature, provenance, approval, safety, compatibility, target
-execution, or a general proof system.
+Workspace Patch Evidence v1 packages one admitted
+[Semantic Workspace Transaction v1](SEMANTIC-WORKSPACE-TRANSACTION-V1.md).
+It independently rebuilds the exact workspace preview and each changed path's
+Semantic Review v1 and Patch Evidence v1 facts. Apply requires exact typed and
+byte replay before candidate generation or staging. Here “proof” means only
+closed deterministic replay—not signature, provenance, approval, safety,
+compatibility, target execution, or a general proof system.
 
 ## Commands and public API
 

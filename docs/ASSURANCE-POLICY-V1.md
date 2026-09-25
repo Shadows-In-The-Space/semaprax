@@ -9,17 +9,11 @@ contributors integrating [Assurance Manifest v1](ASSURANCE-MANIFEST-V1.md)
 [SMT Proof Certificate v1](SMT-PROOF-CERTIFICATE-V1.md) (#186) into a runtime
 library, CLI, or CI surface (issue #187).
 
-Assurance Policy v1 (`semaprax.assurance-policy.v1`) is a deterministic,
-read-only evaluator over one already-generated Assurance Manifest v1
-envelope. It answers exactly one question per obligation: does its current
-`classification` satisfy one of four named policy profiles? It reports a
-fixed, documented remediation suggestion when the answer is no, and a fixed
-retention verdict for any `runtime_guarded` method record. It is proof data,
-not permission, matching AGENTS.md's "evidence capsules carry no authority"
-and "a settlement or concurrency model is proof data, not permission to
-perform a physical finalizer, spawn runtime work, or publish an artifact."
-This module never re-derives obligations, never touches source or a target
-artifact, and never removes anything itself.
+Assurance Policy v1 (`semaprax.assurance-policy.v1`) evaluates one generated
+manifest. For each obligation it asks whether `classification` meets one of four
+profiles, then returns fixed remediation and `runtime_guarded` retention advice.
+It is proof data, not authority: it never re-derives obligations, touches source
+or target artifacts, or removes anything.
 
 The implementing library module is
 [`src/assurance_policy.rs`](../src/assurance_policy.rs). It is exposed

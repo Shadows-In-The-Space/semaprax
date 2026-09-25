@@ -16,10 +16,10 @@ the former callable-composition gap, but not public execution/admission.
 
 ## Purpose
 
-The first slice converts the existing validated ownership and cleanup meaning
-into real host behavior on both native and WebAssembly targets. It must consume
-the exact attached `semaprax.cleanup-plan.v2`; a backend or host may not infer,
-repair, or independently choose ownership behavior after HIR validation.
+This slice turns validated ownership and cleanup into host behavior on native
+and WebAssembly targets. Both must consume the attached
+`semaprax.cleanup-plan.v2` exactly; neither may infer, repair, or choose a
+different ownership behavior after HIR validation.
 
 The slice admits only monomorphic functions whose complete reachable type and
 control-flow shape is:

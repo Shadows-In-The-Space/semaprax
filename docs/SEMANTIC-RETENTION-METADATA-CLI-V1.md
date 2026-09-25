@@ -6,12 +6,10 @@ The broader retention programme remains Partial.
 
 Audience: compiler contributors, CLI integrators, and retention-store hosts.
 
-This contract exposes authority-neutral retention planning and the immutable
-semantic retention metadata store through four explicit command-line
-operations. It derives a checkpoint and its exact companion plan from
-caller-declared metadata, can make that pair durable, and restores it under
-caller-held selectors. It does not make a retained subject current or
-actionable.
+Four CLI operations plan retention and use the immutable metadata store. They
+derive a checkpoint and companion plan from caller-declared metadata, store
+the pair, and restore it under caller-held selectors. They do not make a
+retained subject current or actionable.
 
 ## Declaration inventory construction
 

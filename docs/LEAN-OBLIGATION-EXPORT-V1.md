@@ -11,10 +11,10 @@ Status: one tranche of [issue #186]. Owns three wire identities:
 | `semaprax.lean-proof-certificate.v1` | `proof_export::export_obligation_certificate` | `proof_export::verify::*` and any independent replayer |
 | `semaprax.lean-proof-program-root-binding.v1` | `proof_export::bind_certificate_to_program_root` | `proof_export::verify_certificate_against_program_root` and the exact Assurance Manifest method attachment |
 
-Implementation: `src/proof_export/`. Specification precedence: this document
-owns the profile, the translation, the trusted base, the result grammar and
-the certificate schema. Where it and the code disagree, the code's tests
-(`src/proof_export/tests.rs`) are the tiebreaker to be fixed, not ignored.
+`src/proof_export/` implements this profile. This document owns translation,
+trusted base, result grammar, and certificate schema. If code and specification
+disagree, `src/proof_export/tests.rs` is the tiebreaker; fix the discrepancy,
+never ignore it.
 
 ## What has and has not been executed
 

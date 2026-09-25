@@ -8,10 +8,10 @@ separately gated.
 
 Audience: language users, compiler contributors, and ownership reviewers.
 
-`string_as_str(value)` is the compiler-owned `core.string.as-str` operation. It
-accepts exactly one unprojected named owning `string` place and produces a
-non-escaping `borrow str` view. The operation does not transfer, clone, drop, or
-settle the owner. The owner remains the sole cleanup root.
+`string_as_str(value)` is compiler-owned `core.string.as-str`. It takes one
+unprojected named owning `string` place and returns a non-escaping `borrow str`
+view. It does not transfer, clone, drop, or settle the owner, which remains the
+sole cleanup root.
 
 Resolution emits `BorrowPlace` with the exact operation identity and owner
 `ValueId`. Source verification and checked-HIR validation reject literals,

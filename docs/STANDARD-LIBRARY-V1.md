@@ -7,15 +7,14 @@
 - Audience: standard-library authors, compiler contributors, and agents
   choosing between a compiler-owned function and a library declaration.
 
-This document owns the standard-library contract: how the library is
-composed, what every public declaration must carry, the portability tiers, the
-required module set, the effect vocabulary hosted modules declare, and the
-Everyday profile. The [completion matrix](COMPLETION-MATRIX.md) owns status;
-the generated [standard library catalog](STANDARD-LIBRARY-CATALOG.md) lists the
-declarations that exist today and `semaprax help library` prints it offline;
-`semaprax help library <module|name|stable-id>` selects an exact compact entry
-from its generated JSON companion; `tests/project.rs::standard_library` is the
-executable gate.
+This contract defines library composition, required public declaration fields,
+portability tiers, required modules, hosted-effect vocabulary, and the Everyday
+profile. The [completion matrix](COMPLETION-MATRIX.md) owns status. The generated
+[catalog](STANDARD-LIBRARY-CATALOG.md) lists current declarations;
+`semaprax help library` prints it offline, and
+`semaprax help library <module|name|stable-id>` selects a compact exact entry
+from its JSON companion. `tests/project.rs::standard_library` is the executable
+gate.
 
 
 ## Released library evidence

@@ -1,18 +1,19 @@
 # Graph Agent Transport v1
 
-Audience: agent and tool authors, plus compiler contributors.
+Audience: agent and tool authors; compiler contributors.
 
-Status: implemented bounded JSON-RPC transport and one warm in-memory session per process;
-**HOSTED GREEN** under the
-[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). This v1 protocol does not add persistent indexed revisions.
+Use `semaprax serve` to query one checked program repeatedly over a bounded
+JSON-RPC stream, without reparsing it for each request. The session stays in
+memory; this protocol does not add persistent indexed revisions.
+
+Status: implemented bounded transport; **HOSTED GREEN** under the
+[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 
 ## Purpose
 
-Agents consume program meaning through the semantic graph, not through source
-text. Until now every query paid a full process spawn plus parse plus verify:
-`semaprax graph file.spx`, `semaprax context file.spx symbol`. Graph Agent
-Transport v1 binds one checked program to a session once and then answers many
-requests over a single deterministic byte stream.
+Separate `semaprax graph file.spx` and `semaprax context file.spx symbol`
+calls each start a process, parse, and verify. `semaprax serve` binds one
+checked program and answers many requests over one deterministic byte stream.
 
 ## Wire contract
 

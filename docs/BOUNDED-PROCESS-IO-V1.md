@@ -22,11 +22,9 @@ process_run(tool: usize, argv: borrow Slice<u8>, argv_length: usize,
             stdout_max: usize, stderr_max: usize) -> own Bytes
 ```
 
-Its stable operation identity is `core.host.process-run`. The executable is
-selected by an explicit numeric registry tool identity; it is never a path,
-`PATH` lookup, shell command, or shell script.
-The registry entry supplies the executable, explicit working directory,
-environment policy, and argv policy.
+Its stable operation identity is `core.host.process-run`. An explicit numeric registry tool identity selects the executable, never a
+path, `PATH` lookup, shell command, or shell script. The registry entry supplies
+the executable, explicit working directory, environment policy and argv policy.
 
 The argv wire starts with one little-endian `u32` argument count. Each item
 then contains a little-endian `u32` byte length and that many non-NUL bytes.
@@ -37,11 +35,11 @@ wire are rejected. The request carries the
 combined argv wire and stdin input within 65,536 bytes, a timeout between 1
 and 30,000 milliseconds, and the existing maximum of 16 arguments.
 
-One invocation admits at most 16 process runs and at most 1 MiB of cumulative
-input plus reserved output-wire bytes. The complete request is validated before
-its reservation is admitted. Once valid capacity is reserved, it is consumed
-even when launch, I/O, or settlement later fails; there are no refunds. All
-arithmetic and wire lengths are checked before launch.
+An invocation admits at most 16 process runs and 1 MiB of cumulative input
+plus reserved output-wire bytes. The complete request must pass validation
+before capacity is reserved. That reservation is consumed even if launch, I/O
+or settlement fails; it is never refunded. Arithmetic and wire lengths are
+checked before launch.
 
 ## Result wire
 
@@ -58,11 +56,10 @@ The result is exactly one version-1 little-endian wire:
 The reservation satisfies `32 + stdout_max + stderr_max <= 65,536`. Each
 returned stream must fit its requested maximum, and the complete wire must
 have exactly `32 + stdout_length + stderr_length` bytes, without trailing data.
-The caller receives a result only after both pipes and the child have settled.
-The provider's fallible settlement returns success `0` or failure status `7`
-before result publication. Failure publishes no partial output. A nonzero
-normal exit is still a normal settled result and is not itself a process-I/O
-failure.
+The caller receives a result only after both pipes and the child settle.
+Settlement returns success `0` or failure status `7` before publication; failure
+publishes no partial output. A normal exit with a nonzero code is still a
+settled result, not by itself a process-I/O failure.
 
 ## Closed failures and authority
 

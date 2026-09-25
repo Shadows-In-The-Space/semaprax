@@ -4,15 +4,10 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax abi-report <file.spx>` is a deterministic, read-only projection that
-describes, for explicitly selected public monomorphic scalar functions, both
-the native fast ABI and the portable canonical ABI of the same declaration. It
-is the first executable slice of the completion-matrix row "Portable canonical
-ABI and native fast ABI" under Ecosystem interoperability. It is a report and
-descriptor only: it maps no interface semantics beyond the selected scalar
-exports, performs no borrowing (the slice is copy-only), runs no
-cross-language conformance suite, compiles nothing, executes nothing, and
-changes no source.
+`semaprax abi-report <file.spx>` deterministically describes both native-fast
+and portable-canonical ABI for selected public monomorphic scalar functions.
+It is a report only: copy-only, with no borrowing, conformance suite,
+compilation, execution, source change, or extra interface mapping.
 
 ## Command
 

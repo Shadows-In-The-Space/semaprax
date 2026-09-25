@@ -11,8 +11,7 @@ Audience: release engineers, platform maintainers, and security reviewers.
 ## Purpose and boundary
 
 The production provisioner owns bootstrap and aggregate settlement for the
-private launcher, worker, and collector. It does not make an ordinary
-`semaprax doctor --profile` selector authoritative. Its dedicated,
+private launcher, worker, and collector. It does not make an ordinary `semaprax doctor --profile` selector authoritative. Its dedicated,
 single-threaded process receives a closed descriptor inventory, verifies a
 signed release capsule, creates private namespaces, installs aggregate cgroup
 limits, launches only held images, and releases the report only after the owned

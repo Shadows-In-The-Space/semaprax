@@ -128,7 +128,7 @@ gate requires all three matrices.
 The Rust 1.88 minimum-version lane uses `scripts/ci-msrv.py` to split the
 complete Cargo workspace inventory into one lib/bin and three integration
 shards. Every shard keeps workspace-wide feature unification, locked
-dependencies, and the workflow's 240-minute job limit. Only the unit shard
+dependencies, and the workflow's 360-minute job limit. Only the unit shard
 runs the whole-workspace all-targets/all-features check; repeating it in
 integration shards would add no target coverage. Fail-fast is off so every
 shard reports after a peer failure. Shared integration target names stay together;

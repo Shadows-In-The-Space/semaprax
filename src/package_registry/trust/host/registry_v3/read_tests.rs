@@ -64,7 +64,7 @@ fn wrong_generation_lock_coordinate_path_registry_and_stale_time_refuse() {
             4 => read.path = "../module.wasm",
             5 => read.registry = &yanked.admitted.0,
             6 => read.trusted_time = 99,
-            _ => read.trusted_time = 300,
+            _ => read.trusted_time = f.expired_time(),
         };
         code(
             store.read_artifact(&read),

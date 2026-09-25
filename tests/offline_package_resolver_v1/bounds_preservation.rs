@@ -92,23 +92,47 @@ fn decision_and_work_exhaustion_abort_the_whole_search() {
         "SPX-PR505"
     );
 
-    let package = "resolver.work";
-    let literal = "a".repeat(940_000);
-    let large_report = report_from_source(
-        package,
-        &format!(
-            "module {package};\n\
-             @id(\"{package}.payload\")\n\
-             fn payload() -> string {{ \"{literal}\" }}\n\
-             @id(\"{package}.main\")\n\
-             fn main() -> i64 {{ 0 }}\n"
-        ),
-    );
-    let subjects = (0..9)
-        .map(|patch| subject(&large_report, package, &format!("1.0.{patch}"), &[], &[]))
+    // The source-byte work charge is global across all authenticated subjects.
+    // Two sources with many small declarations, each reused across 32 admitted
+    // versions, cross the same 8 MiB authenticated-source work bound without
+    // making the formatter repeatedly walk one pathological giant expression.
+    let packages = ["resolver.work.a", "resolver.work.b"];
+    let padding = "a".repeat(230);
+    let reports = packages
+        .iter()
+        .map(|package| {
+            let payloads = (0..512)
+                .map(|index| {
+                    format!(
+                        "@id(\"{package}.payload.{index}\")\nfn payload_{index}_{padding}() -> i64 {{ 0 }}\n"
+                    )
+                })
+                .collect::<String>();
+            report_from_source(
+                package,
+                &format!(
+                    "module {package};\n\
+                     {payloads}\
+                     @id(\"{package}.main\")\n\
+                     fn main() -> i64 {{ 0 }}\n"
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let subjects = packages
+        .iter()
+        .zip(&reports)
+        .flat_map(|(package, report)| {
+            (0..32).map(|patch| subject(report, package, &format!("1.0.{patch}"), &[], &[]))
+        })
         .collect::<Vec<_>>();
     assert_eq!(
-        error_code(&input(&[(package, "^1.0.0")], subjects, "native64", &[])),
+        error_code(&input(
+            &[(packages[0], "^1.0.0")],
+            subjects,
+            "native64",
+            &[]
+        )),
         "SPX-PR505"
     );
 }

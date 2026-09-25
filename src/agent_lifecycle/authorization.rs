@@ -586,7 +586,7 @@ fn dispatch_on_admitted(
         }
         #[cfg(test)]
         StageBackend::Wasm { source } => WasmStageExecutor {
-            host: test_wasm_stage_host(),
+            host: super::tests::test_wasm_stage_host(),
             source,
         }
         .execute(
@@ -606,23 +606,6 @@ fn dispatch_on_admitted(
             cancellation,
         ),
     }
-}
-
-#[cfg(test)]
-pub(super) fn test_wasm_stage_host() -> &'static WasmStageHost {
-    static HOST: std::sync::OnceLock<WasmStageHost> = std::sync::OnceLock::new();
-    HOST.get_or_init(|| {
-        std::env::var_os("SEMAPRAX_TEST_WASM_STAGE_NODE")
-            .map(std::path::PathBuf::from)
-            .into_iter()
-            .chain([
-                std::path::PathBuf::from("/usr/bin/node"),
-                std::path::PathBuf::from("/usr/local/bin/node"),
-                std::path::PathBuf::from("/opt/homebrew/bin/node"),
-            ])
-            .find_map(|path| WasmStageHost::open(&path).ok())
-            .expect("Core Wasm tests require an explicit absolute Node fixture path")
-    })
 }
 
 /// Convenience wrapper over [`dispatch_on`] selecting [`StageBackend::Interpreter`],

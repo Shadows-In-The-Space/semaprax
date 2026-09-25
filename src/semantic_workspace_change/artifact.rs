@@ -21,6 +21,9 @@ use crate::bounded_output::CappedString;
 use crate::diagnostic::Diagnostic;
 use crate::{semantic_workspace, workspace_graph};
 
+mod json;
+use json::push_json;
+
 const PREVIEW_SCHEMA: &str = "semaprax.workspace-semantic-change-preview.v1";
 const CONTEXT_SCHEMA: &str = "semaprax.workspace-semantic-change-context.v1";
 const IMPACT_SCHEMA: &str = "semaprax.workspace-semantic-change-impact.v1";
@@ -1377,24 +1380,6 @@ fn push_optional(output: &mut CappedString, value: Option<&str>) {
     } else {
         output.push_str("null");
     }
-}
-
-fn push_json(output: &mut CappedString, value: &str) {
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            character if character.is_control() => {
-                write!(output, "\\u{:04x}", character as u32).expect("string writes cannot fail");
-            }
-            character => output.push(character),
-        }
-    }
-    output.push('"');
 }
 
 fn replay_prepared(prepared: &SemanticWorkspacePreparedChange) -> Result<(), Vec<Diagnostic>> {

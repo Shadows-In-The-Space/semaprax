@@ -23,7 +23,18 @@ use crate::{semantic_workspace, semantic_workspace_change, workspace, workspace_
 
 mod evidence_artifact;
 mod evidence_verification;
+#[cfg(test)]
+mod instrumentation;
 mod nominal_rename;
+
+#[cfg(test)]
+pub(crate) use instrumentation::mark_base_operations_preflight_entry;
+#[cfg(test)]
+use instrumentation::{
+    base_operations_preflight_entry_count, candidate_preflight_entry_count,
+    mark_candidate_preflight_entry, reset_base_operations_preflight_entry_count,
+    reset_candidate_preflight_entry_count,
+};
 
 pub(crate) use nominal_rename::derive_nominal_rename;
 
@@ -55,42 +66,6 @@ const CHANGE_SCHEMA: &str = "semaprax.workspace-semantic-change.v1";
 const MAX_DERIVATION_BYTES: usize = 33_554_432;
 const MAX_TOTAL_DERIVATION_BYTES: usize = 67_108_864;
 const MAX_JSON_DEPTH: usize = 8;
-
-#[cfg(test)]
-thread_local! {
-    static CANDIDATE_PREFLIGHT_ENTRY_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static BASE_PREFLIGHT_ENTRY_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn reset_candidate_preflight_entry_count() {
-    CANDIDATE_PREFLIGHT_ENTRY_COUNT.with(|count| count.set(0));
-}
-
-#[cfg(test)]
-fn candidate_preflight_entry_count() -> usize {
-    CANDIDATE_PREFLIGHT_ENTRY_COUNT.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-fn reset_base_operations_preflight_entry_count() {
-    BASE_PREFLIGHT_ENTRY_COUNT.with(|count| count.set(0));
-}
-
-#[cfg(test)]
-fn base_operations_preflight_entry_count() -> usize {
-    BASE_PREFLIGHT_ENTRY_COUNT.with(std::cell::Cell::get)
-}
-
-#[cfg(test)]
-pub(crate) fn mark_base_operations_preflight_entry() {
-    BASE_PREFLIGHT_ENTRY_COUNT.with(|count| count.set(count.get() + 1));
-}
-
-#[cfg(test)]
-fn mark_candidate_preflight_entry() {
-    CANDIDATE_PREFLIGHT_ENTRY_COUNT.with(|count| count.set(count.get() + 1));
-}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum DeclarationSubject {

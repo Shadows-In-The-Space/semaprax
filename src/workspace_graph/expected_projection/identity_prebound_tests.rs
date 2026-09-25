@@ -56,8 +56,22 @@ fn identity_prebound_preserves_every_legacy_accepted_receipt() {
 fn identity_prebound_excludes_reverse_dependent_names_only_after_refusal() {
     let programs = fixture(310, 220, true);
     let authored = super::super::index_authored(&programs).unwrap();
-    assert!(retention_prebound(&programs, &authored, false).is_err());
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() < 100);
+    let unscoped = retention_prebound(&programs, &authored, false).unwrap().1;
+    let scoped = retention_prebound(&programs, &authored, true).unwrap().1;
+    assert!(
+        scoped < unscoped,
+        "excluding reverse dependents must save bytes"
+    );
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.replace(scoped));
+    let _restore = Restore(previous);
+    assert!(retention_prebound(&programs, &authored, false).is_err());
     assert_eq!(
         checked_retention_prebound(&programs, &authored).unwrap(),
         retention_prebound(&programs, &authored, true).unwrap()
@@ -68,6 +82,40 @@ fn identity_prebound_still_charges_reachable_long_identities() {
     let programs = fixture(800, 220, false);
     let authored = super::super::index_authored(&programs).unwrap();
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() >= 220);
+    let shorter = fixture(800, 16, false);
+    let shorter_authored = super::super::index_authored(&shorter).unwrap();
+    let modes = [(false, 0), (true, 0), (true, 2), (true, 3), (true, 4)];
+    let short_min = modes
+        .iter()
+        .filter_map(|&(scoped, mode)| {
+            retention_prebound_mode(&shorter, &shorter_authored, scoped, mode)
+                .ok()
+                .map(|cost| cost.1)
+        })
+        .min()
+        .unwrap();
+    let long_min = modes
+        .iter()
+        .filter_map(|&(scoped, mode)| {
+            retention_prebound_mode(&programs, &authored, scoped, mode)
+                .ok()
+                .map(|cost| cost.1)
+        })
+        .min()
+        .unwrap();
+    assert!(
+        long_min > short_min,
+        "reachable long IDs must raise every receipt"
+    );
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.set(self.0));
+        }
+    }
+    let previous = super::super::ACTIVE_BUILDER_LIMIT.with(|limit| limit.replace(short_min));
+    let _restore = Restore(previous);
+    assert!(checked_retention_prebound(&shorter, &shorter_authored).is_ok());
     assert!(checked_retention_prebound(&programs, &authored).is_err());
 }
 

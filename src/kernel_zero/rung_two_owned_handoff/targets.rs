@@ -81,7 +81,8 @@ fn owned_handoff_native_and_wasm_settle_refuse_and_reenter() {
             )
             .unwrap();
         }
-        let native = format!("{}\n#define SPX_OWNED_DATA_TESTING 1\n{}\n#define HANDOFF {}\n#define CASES() do {{ {} }} while (0)\n{}",
+        let native = format!("{}\n{}\n#define SPX_OWNED_DATA_TESTING 1\n{}\n#define HANDOFF {}\n#define CASES() do {{ {} }} while (0)\n{}",
+            include_str!("../../../tests/support/native_fixture_stdio.c"),
             include_str!("../../../tests/native_owned_tuple_admission_v1/allocations.c"),
             String::from_utf8(boundary.binding.c_source.clone()).unwrap(),
             boundary.binding.c_symbol, calls, NATIVE);
@@ -156,6 +157,7 @@ static void run_case(const uint8_t *input, uint64_t length) {
     REQUIRE(fixture_free_calls == releases + 1);
 }
 int main(void) {
+    REQUIRE(fixture_binary_stdout());
     fixture_calibrate();
     REQUIRE(spx_owned_data_context_init_v1(&context,sizeof(context)) == 0);
     uint8_t input[21] = {0}; uint32_t tag = UINT32_MAX; uint64_t handle = 0; int64_t error = INT64_MIN;

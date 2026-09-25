@@ -503,6 +503,10 @@ pub(super) fn base_fixture() -> BaseFixture {
 }
 
 fn base_fixture_with_order(reverse_sources: bool) -> BaseFixture {
+    base_fixture_with_extra_sources(reverse_sources, 0)
+}
+
+fn base_fixture_with_extra_sources(reverse_sources: bool, extra_sources: usize) -> BaseFixture {
     let mut sources = vec![
         semantic_workspace::SemanticWorkspaceSource {
             path: "a/provider.spx".to_owned(),
@@ -521,6 +525,17 @@ fn base_fixture_with_order(reverse_sources: bool) -> BaseFixture {
             source: entry(),
         },
     ];
+    for index in 0..extra_sources {
+        sources.push(semantic_workspace::SemanticWorkspaceSource {
+            path: format!("q/{index:02}.spx"),
+            source: canonical(
+                &format!(
+                    "module structural.extra{index};\n@id(\"structural.extra{index}.helper\") fn helper() -> i64 {{ 0 }}\n"
+                ),
+                &format!("q/{index:02}.spx"),
+            ),
+        });
+    }
     let mut paths = sources
         .iter()
         .map(|source| source.path.clone())
@@ -852,7 +867,7 @@ fn overlay_preserves_exact_move_bytes_and_enforces_final_cardinality() {
     );
     assert_eq!(supplied_bytes, created().len() + entry_replacement().len());
 
-    let base = base_fixture();
+    let base = base_fixture_with_extra_sources(false, 16);
     let exact_operations = (0..12)
         .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
         .collect::<Vec<_>>();
@@ -868,9 +883,9 @@ fn overlay_preserves_exact_move_bytes_and_enforces_final_cardinality() {
             .into_parts()
             .1
             .len(),
-        16
+        32
     );
-    let base = base_fixture();
+    let base = base_fixture_with_extra_sources(false, 16);
     let over_operations = (0..13)
         .map(|index| create_operation(&format!("x/{index:02}.spx"), ""))
         .collect::<Vec<_>>();
@@ -1264,11 +1279,11 @@ fn managed_generate_and_verify_are_exact_read_only_kats_under_one_shared_lock() 
             raw_sha(artifacts.evidence()),
         ],
         [
-            "sha256:12a5cf81cfee0762b585af64f2fa748ed1a9dec883074e881db73130576eee9e",
-            "sha256:76b64b168d2195ef516151ec6ecd94c97811dea519b639d174fb3b7c09734a41",
-            "sha256:75dc059fcd47aa9dff77cdbbfbb44bbefc5a5fd3151d9fe59f2ce7f8655bdfad",
-            "sha256:7421886e26e05994a597519500cc6d24224af7d1f1391e74663fca62f80d5341",
-            "sha256:ca436c23619e62ce5fd94c7a698110c2a3db24a7cd552f91f4cbcf87e97ca449",
+            "sha256:a2e678d1aa876b52c9c8a2057194a07ed177a5a4952e39d32beb8202798b89dd",
+            "sha256:c64fd676941025157e347a5e144db758c8e10c904d6f6d0aff3c820145e749a0",
+            "sha256:8bc90661ec9683517db424bf91197c1607a59b5d946aa5db276402ee3737bad9",
+            "sha256:b61b0ac5d5de544c747d232aff802950e69a3ade7eaba2617f264f09e6f27faf",
+            "sha256:546be22f4709bb148a29865fcad1aa9489567b0fa8f026588b8f611e139e09a1",
         ]
     );
 
@@ -1315,7 +1330,7 @@ fn managed_generate_and_verify_are_exact_read_only_kats_under_one_shared_lock() 
     assert_eq!(value["budget"]["used_receipt_bytes"], receipt.len());
     assert_eq!(
         raw_sha(&receipt),
-        "sha256:c80f20339b8e19e60514a00264f805a405e57a8585a012648a1ac77576b269d9"
+        "sha256:cae9eb3b85f18d0b89ea2bf6b4408094a7b10de20c4c684bdc8b17edf2f7c28d"
     );
     fixture.assert_exclusive_reacquire();
 }
@@ -1983,7 +1998,7 @@ fn structural_apply_publishes_exact_candidate_once_without_raw_writes() {
     assert_eq!(receipt_value["result"], "applied");
     assert_eq!(
         raw_sha(&receipt),
-        "sha256:c8f3f145def19393332c951221071360425248d33397fca4f1b63cb81cbfdba7"
+        "sha256:7ec9a805e7cceccd4d9690db98188c641f0d910293a907a07d6e4b1370213988"
     );
     assert_eq!(fixture.raw_inventory(), raw_before);
     assert_ne!(
@@ -2636,42 +2651,5 @@ fn structural_apply_rejects_windows_readonly_permission_drift() {
 }
 
 #[cfg(windows)]
-#[test]
-fn structural_apply_rejects_windows_same_byte_file_index_substitution() {
-    let (fixture, evidence_path) = application_fixture("windows-file-index");
-    let active_path = fixture.root.join(".semaprax-workspace/ACTIVE");
-    let active_before = std::fs::read(&active_path).unwrap();
-    let identities = std::cell::RefCell::new(None::<(u64, u64)>);
-    let error = diagnostic(apply_authenticated_with_hook(
-        &fixture.root,
-        &fixture.proposal_path,
-        &evidence_path,
-        |point, _, _, candidate| {
-            if !matches!(
-                point,
-                StructuralApplyPoint::Workspace(
-                    workspace::SemanticChangeApplyPoint::BeforeFirstFinalCheck
-                )
-            ) {
-                return Ok(());
-            }
-            let path = candidate.unwrap().join("files/z/entry.spx");
-            let before = winapi_util::Handle::from_path_any(&path)
-                .and_then(winapi_util::file::information)?
-                .file_index();
-            let bytes = std::fs::read(&path)?;
-            std::fs::remove_file(&path)?;
-            std::fs::write(&path, bytes)?;
-            let after = winapi_util::Handle::from_path_any(&path)
-                .and_then(winapi_util::file::information)?
-                .file_index();
-            assert_ne!(before, after);
-            *identities.borrow_mut() = Some((before, after));
-            Ok(())
-        },
-    ));
-    assert_eq!(error.code, "SPX-G153");
-    assert!(identities.into_inner().is_some());
-    assert_eq!(std::fs::read(&active_path).unwrap(), active_before);
-    fixture.assert_exclusive_reacquire();
-}
+#[path = "tests/windows_file_index.rs"]
+mod windows_file_index;

@@ -19,7 +19,7 @@ use sha2::{Digest as _, Sha256};
 use semaprax::release_provenance::{
     ARCHIVE_PLATFORMS, DSSE_IN_TOTO_PAYLOAD_TYPE, IN_TOTO_STATEMENT_TYPE,
     SIGSTORE_BUNDLE_MEDIA_TYPE, SLSA_PROVENANCE_V1_PREDICATE_TYPE, TRUSTED_ISSUER,
-    TRUSTED_REPOSITORY, TRUSTED_WORKFLOW_PATH,
+    TRUSTED_OIDC_SUBJECT_PREFIX, TRUSTED_REPOSITORY, TRUSTED_WORKFLOW_PATH,
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -119,7 +119,7 @@ fn provenance_json(artifacts: &str, commit: &str, manifest_bytes: &[u8]) -> Stri
 
 fn claim_json(subject_digest: &str, issuer: &str) -> String {
     let workflow_ref = format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/{TAG}");
-    let subject = format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{TAG}");
+    let subject = format!("{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{TAG}");
     format!(
         r#"{{
   "schema": "semaprax.release-signature-claim.v1",
@@ -204,7 +204,7 @@ fn message_signature_bundle(provenance_bytes: &[u8], signature: &str, certificat
 /// binding succeeds and only the cryptographic layer can still refuse it.
 fn signed_claim_json(subject_digest: &str) -> String {
     let workflow_ref = format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/{TAG}");
-    let subject = format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{TAG}");
+    let subject = format!("{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{TAG}");
     format!(
         r#"{{
   "schema": "semaprax.release-signature-claim.v1",

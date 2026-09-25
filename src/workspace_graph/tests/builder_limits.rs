@@ -379,8 +379,14 @@ fn catalog_normalizer_compact_core_fits_production_builder_cap() {
                 "src/batch.spx" => {
                     include_str!("../../../examples/catalog-normalizer-project/src/batch.spx")
                 }
+                "src/enrichment.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/enrichment.spx")
+                }
                 "src/limits.spx" => {
                     include_str!("../../../examples/catalog-normalizer-project/src/limits.spx")
+                }
+                "src/record.spx" => {
+                    include_str!("../../../examples/catalog-normalizer-project/src/record.spx")
                 }
                 "src/tests.spx" => {
                     include_str!("../../../examples/catalog-normalizer-project/src/tests.spx")
@@ -394,6 +400,10 @@ fn catalog_normalizer_compact_core_fits_production_builder_cap() {
         WorkspaceSource {
             path: "dependencies/std.data.json.dec/0.1.0/dec.spx".to_owned(),
             source: include_str!("../../../std/data-json-dec/src/dec.spx").to_owned(),
+        },
+        WorkspaceSource {
+            path: "dependencies/std.data.json.doc/0.1.0/doc.spx".to_owned(),
+            source: include_str!("../../../std/data-json-doc/src/doc.spx").to_owned(),
         },
         WorkspaceSource {
             path: "dependencies/std.io/0.1.0/io.spx".to_owned(),
@@ -415,7 +425,7 @@ fn catalog_normalizer_compact_core_fits_production_builder_cap() {
             );
             panic!("catalog compact core exceeds cap: {errors:?}; forecast={forecast:?}; live debit={debit}, overflow={overflow}, core_ok={}", core.is_ok());
         });
-    assert_eq!(built.hir.modules.len(), 6);
+    assert_eq!(built.hir.modules.len(), 9);
     assert!(built
         .hir
         .modules

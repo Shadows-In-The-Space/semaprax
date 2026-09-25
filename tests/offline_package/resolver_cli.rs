@@ -250,6 +250,16 @@ fn help_keeps_frozen_package_resolve_usage_and_current_cli_snapshot() {
     const RELEASE_VERIFY_LINE: &str = "semaprax release verify <release-dir>\n";
     assert_eq!(current.matches(RELEASE_VERIFY_LINE).count(), 1);
     current = current.replacen(RELEASE_VERIFY_LINE, "", 1);
+    // The lock-bound fetch and explicit-root doctor verifier were added after
+    // the historical help witness was pinned. Keep both additions visible in
+    // current help while comparing the original bytes below.
+    for added_line in [
+        "semaprax fetch --lock <lock.json> <cache-dir> <subject.json>...\n",
+        "semaprax doctor verify-release <release-dir> --trusted-root-sha256 <64-lowercase-hex>\n",
+    ] {
+        assert_eq!(current.matches(added_line).count(), 1);
+        current = current.replacen(added_line, "", 1);
+    }
     // `semaprax audit inspect|verify|diff` was added by #209 (commit 918fe5b0),
     // also after these witnesses were pinned, and its three usages are the
     // 272 bytes that otherwise push the length pin below off by exactly that

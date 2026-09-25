@@ -11,10 +11,10 @@ one immutable Project candidate.
 
 The existing `candidate/impact` route returns a candidate-bound Project
 semantic-impact artifact through the general report-chunk protocol. Compact
-impact navigation gives agents a small summary and opaque, pageable access to
-the artifact's three existing ordered arrays. It recomputes the same compiler
-artifact from the exact final candidate revision on every request. It adds no
-edge family, impact inference, ranking, persistence or semantic-delta claim.
+impact navigation provides a small summary and opaque pages over the artifact's
+three existing ordered arrays. Every request recomputes the artifact from the
+exact final candidate revision. It adds no edge family, impact inference,
+ranking, persistence or semantic-delta claim.
 
 ## Library API
 
@@ -65,8 +65,8 @@ Rows are intentionally not normalized, sorted, merged or reclassified. Each
 unchanged owner row is wrapped as
 `{schema:"semaprax.project-candidate-impact-item.v1",value:<row>}` so generated
 clients can validate the page container while retaining the heterogeneous
-owner value. The compact report is useful navigation over an existing artifact,
-not independent evidence that its rows are complete or correct.
+owner value. The compact report helps navigate an existing artifact; it does
+not independently prove that the rows are complete or correct.
 
 ## Query, truncation and references
 

@@ -8,10 +8,10 @@ separately gated.
 
 Audience: language-tool authors, agent builders, and compiler contributors.
 
-This additive library lane prepares the exact entry and test closures of one
-immutable `ProjectRevision` once, then evaluates them sequentially on one
-long-lived fixed 64 MiB stack. It does not parse, resolve, link, scan closure
-admission, or allocate another evaluator thread for each request. Existing
+This library route prepares one immutable `ProjectRevision`'s exact entry and
+test closures once, then evaluates them sequentially on one long-lived fixed
+64 MiB stack. Each request avoids parsing, resolution, linking, closure
+admission scans and allocation of another evaluator thread. Existing
 `ProjectRevision::execute_*`, `semaprax.project-execution.v1`, Interpreter v1,
 and Project Agent Transport v1-v5 APIs and bytes are unchanged.
 
@@ -26,8 +26,7 @@ explicit-entry/signature/profile closure gate, and creates an owned stable-ID
 to function-index map for the exact transitive closures. The combined cache is
 limited to 262,144 expression origins and 16 MiB of identity/source-index
 facts. Each expression span must fit its authenticated Project source and one
-complete origin fact must fit the minimum output envelope. A prepared value is
-not cloneable and owns exactly one sequential worker.
+complete origin fact must fit the minimum output envelope. A prepared value owns exactly one sequential worker and cannot be cloned.
 
 ## Library surface
 

@@ -11,19 +11,19 @@ of exact contract/test-fact selection.
 [Exact Program Context v1](EXACT-PROGRAM-CONTEXT-V1.md), its exact
 [Contracts and Tests Facts v1](CONTRACTS-AND-TESTS-FACTS-V1.md), and the
 [ProgramRoot v3](PROGRAM-ROOT-V3.md) that appends the descriptor for those same
-facts. It is an additive typed in-memory selection layer. Exact-context v1,
-ProgramRoot v1/v2/v3, facts, query, transaction, evidence, service receipt, and
-history wire bytes are unchanged.
+facts. This adds typed in-memory selection without changing exact-context v1,
+ProgramRoot v1/v2/v3, facts, query, transaction, evidence, service receipt or
+history wire bytes.
 
 ## Derivation, replay, and identity
 
-`assemble` derives facts from the retained admitted Project, derives
-ProgramRoot v3 from the complete v1 context, and passes both through the same
-independent replay used by `derive`. `derive` first validates the exact enriched
-workspace and ProgramRoot-v3 selectors, freshly replays context v1, facts, and
-ProgramRoot v3, and rejects any cross-pairing. `replay` performs that selector
-check before parsing submitted context-v2 bytes, then requires exact canonical
-shape, self-authenticated identity, and byte-for-byte fresh derivation.
+`assemble` derives facts from the retained admitted Project and ProgramRoot v3
+from the complete v1 context, then independently replays both as `derive` does.
+`derive` checks the exact enriched workspace and ProgramRoot-v3 selectors,
+replays context v1, facts and ProgramRoot v3, and rejects mismatched pairs.
+`replay` checks selectors before parsing submitted context-v2 bytes. It then
+requires exact canonical shape, self-authenticated identity and byte equality
+with a fresh derivation.
 
 The schema is `semaprax.exact-program-context.v2`; the complete document is
 capped at 96 KiB. Its closed descriptor contains the Project and enriched

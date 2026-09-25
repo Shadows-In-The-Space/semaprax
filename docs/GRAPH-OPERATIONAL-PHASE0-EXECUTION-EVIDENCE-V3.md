@@ -6,9 +6,9 @@ retain their exact-subject claims.
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract reruns the selected Phase 0 evidence at one clean exact local
-commit. It updates the aggregate for the v2 VS Code task-control scenario and
-makes evidence status classes explicit in one canonical envelope.
+V3 reruns the selected Phase 0 gates at one clean, exact local commit. Its
+canonical envelope includes the v2 VS Code task-control scenario and states
+each evidence-status class explicitly.
 
 ```sh
 python3 scripts/graph-operational-phase0-evidence.py \
@@ -20,9 +20,9 @@ python3 scripts/graph-operational-phase0-evidence.py \
   --mcp-python /absolute/path/to/python-with-mcp-1.27.0
 ```
 
-The aggregate fails unless every executed child binds the same commit and tree,
-the repository stays clean and unchanged, all selected tools remain identical,
-and every archived byte replays to its recorded digest and bundle identity.
+The aggregate fails if a child binds a different commit or tree, the repository
+changes or becomes dirty, a selected tool differs, or archived bytes fail to
+replay to their recorded digest and bundle identity.
 
 ## Closed evidence classes
 

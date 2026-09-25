@@ -31,16 +31,15 @@ stale Project/candidate selectors fail closed.
 
 The result schema is
 `semaprax.project-candidate-external-api-contract-delta.v1`. It binds the base
-and candidate Project, Workspace and semantic-graph digests, retains both exact
-canonical declarations and their digests, and emits the canonical union of
-declared export identities. Each row is `added`, `removed`, `changed` or
+and candidate Project, Workspace and semantic-graph digests, keeps both exact
+canonical declarations and their digests, and lists the canonical union of
+their declared export identities. Each row is `added`, `removed`, `changed` or
 `unchanged`; changed rows name only the `operation_digest` and/or
 `schema_digest` facets that differ. Inventory counts summarize those rows.
 
-Added and removed describe the two caller-declared inventories. They do not
-prove that a provider added or removed a deployed API. The comparison can also
-use different explicit subsets, so the result must be reviewed with both
-retained scope declarations.
+Added and removed refer to the caller's inventories, not changes to a deployed
+API. Because the two sides can select different explicit subsets, review the
+result together with both retained scope declarations.
 
 `compatibility` is always `not_assessed`. The report supplies no endpoint,
 provider, network, runtime, version, conformance, consumer or migration

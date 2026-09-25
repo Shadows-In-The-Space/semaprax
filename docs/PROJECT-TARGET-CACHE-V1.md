@@ -7,9 +7,9 @@ Status: implemented scalar Web, pathless C11 and pathless npm cache lanes;
 Audience: compiler contributors and embedding hosts that already hold an
 admitted immutable Project revision.
 
-`ProjectTargetCache` is a caller-owned cache with one exact entry for the
-existing scalar Web inline carrier and one for the existing pathless native-C11
-carrier plus one for the existing pathless npm carrier. It accepts only a private-constructor
+`ProjectTargetCache` belongs to the caller and holds three exact entries: one
+for the scalar Web inline carrier, one for the pathless native-C11 carrier,
+and one for the pathless npm carrier. It accepts only a private-constructor
 `ProjectRevision`; source verification, HIR validation, workspace linking and
 Project-profile admission therefore precede the cache boundary. Every request
 also invokes the revision's held-input check. The cache grants no source,
@@ -25,9 +25,8 @@ revision, workspace revision, Project graph digest, entry module, ordered Web
 exports, and the requested target byte limit. A mismatch is a miss rather than
 an approximate hit.
 
-On a miss, the ordinary Web, C or npm path emits the selected target. On an
-exact hit, the cache skips only deterministic target
-emission and carrier assembly. The Web lane reruns its independent integrity
+On a miss, the ordinary Web, C or npm path emits the target. An exact hit skips
+only deterministic target emission and carrier assembly. The Web lane reruns its independent integrity
 verification. The C lane replays canonical payload digest, exact
 revision/manifest/source/export bindings, artifact hex/count/SHA inventory and
 every embedded C-header envelope, then compares separately retained digest and

@@ -7,17 +7,16 @@ The broader Everyday profile remains incomplete.
 Audience: language users, compiler contributors, standard-library authors, and
 backend implementers.
 
-This profile defines the first source-authored `std.io` Reader and Writer
-shapes. Each is an ordinary nongeneric record containing a caller-supplied
-`Bytes` buffer and a `usize` cursor. The records are public source values with
-ordinary constructors and field rules; they make no opaque or unforgeable
-representation claim.
+The first source-authored `std.io` Reader and Writer are ordinary nongeneric
+records. Each holds a caller-supplied `Bytes` buffer and a `usize` cursor.
+They use normal constructors and field rules; their public source representation
+is neither opaque nor unforgeable.
 
 ## Cursor transitions
 
-`reader_from_bytes` and `writer_from_bytes` consume an existing buffer and
-start at position zero. Borrowed `position` and `remaining` observers preserve
-the owner; `reader_peek` returns one `u8` and requires a nonempty remainder.
+`reader_from_bytes` and `writer_from_bytes` consume a buffer and start at zero.
+Borrowed `position` and `remaining` keep the owner; `reader_peek` requires
+remaining input and returns one `u8`.
 `reader_advance` consumes its Reader and clamps the requested advance to the
 remaining length. `writer_write_u8` requires spare capacity, consumes its
 Writer, replaces that byte, and advances by one. Each `finish` consumes its

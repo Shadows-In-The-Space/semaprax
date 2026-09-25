@@ -7,26 +7,24 @@ Status: private, workspace-only quarantine. It is used by the unpublished
 callable path, but not by ordinary compiler preflight or any public adapter,
 and it does not change `SPX-B104`.
 
-`crates/semaprax-native-loader` isolates the unavoidable unsafe operations for
-opening a trusted native library, resolving one fixed C descriptor getter,
-calling it, and reading and comparing an exactly bounded expected byte range.
-Its separately versioned callable-v2 constructor additionally resolves one
-exact C byte-wire function after descriptor equality. The private settlement-v3
-constructor consumes only a structurally bounded `SPXNABI3` projection already
-accepted by the independent host decoder, resolves its getter plus six-argument
-execute and settle entries eagerly, and admits them only when every function
-address and the returned descriptor address belong to the canonical root
-image, then retains its own immutable copy of the admitted bytes. Unix proves
-this with `dladdr` plus canonical path equality; Windows
-uses address-to-module allocation-base resolution plus canonical module-path
-equality without adding another image reference. Unix opens use
-`RTLD_NOW | RTLD_LOCAL`, so dependency relocations fail during admission
-rather than at a later first call. The main `semaprax` crate remains
-`unsafe_code = "forbid"`. The loader is unpublished. Dynamic-image builds have
-one exact-pinned `libloading` dependency; iOS builds resolve no `libloading`
-dependency and expose only the static settlement registration surface. The
-crate exposes no generic symbol lookup, raw handle, raw
-pointer, callable pointer, or manual close, and returns only opaque
+`crates/semaprax-native-loader` confines unsafe work: opening a trusted native
+library, resolving and calling one fixed C descriptor getter, then comparing an
+exactly bounded byte range. Its callable-v2 constructor resolves one C
+byte-wire function only after descriptor equality. The private settlement-v3
+constructor accepts a bounded `SPXNABI3` projection already checked by the
+independent host decoder. It eagerly resolves the getter and six-argument
+execute and settle entries. All function and returned descriptor addresses
+must belong to the canonical root image; the loader then retains an immutable
+copy of the admitted bytes.
+
+Unix checks root-image ownership with `dladdr` and canonical path equality;
+Windows checks allocation-base and canonical module path without another
+image reference. Unix uses `RTLD_NOW | RTLD_LOCAL`, making dependency relocation
+fail at admission instead of first call. The main `semaprax` crate remains
+`unsafe_code = "forbid"`, and the loader remains unpublished. Dynamic-image
+builds pin one `libloading` dependency; iOS builds have none and expose only
+static settlement registration. The crate exposes no generic symbol lookup,
+raw handle, raw pointer, callable pointer, or manual close. It returns opaque
 `Arc`-backed leases with explicit retention and exact logical-admission
 identity. Leases are deliberately neither `Send` nor `Sync`, keeping
 potential native terminator execution on the opening thread until a future

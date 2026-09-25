@@ -6,12 +6,11 @@ Status: implemented Rust host runtime with invocation-owned HTTPS work;
 **HOSTED GREEN** under the [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 Language syntax and backend lowering remain open.
 
-`semaprax::structured_tasks::task_scope` executes real user closures inside a
-lexical scoped-thread lifetime. A scope admits at most 64 tasks, rejects empty,
-NUL-bearing, and duplicate stable identities, starts workers in canonical
-identity order, shares one cooperative cancellation token, and joins every
-worker before returning. Closures may borrow non-`'static` values because the
-scoped-thread type system prevents escape.
+`semaprax::structured_tasks::task_scope` runs user closures in a lexical
+scoped-thread lifetime. It admits at most 64 tasks, rejects empty, NUL-bearing,
+or duplicate stable IDs, starts workers in canonical identity order, shares
+one cancellation token, and joins all workers before return. Scoped threads
+allow non-`'static` borrows without letting them escape.
 
 The first failed result in canonical report order is sticky. Semantic,
 nonzero-physical, cancellation, and panic outcomes trigger cancellation;

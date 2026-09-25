@@ -7,13 +7,12 @@ their narrower scope; public promotion and broader product completion remain
 separately gated.
 Audience: package tooling authors and compiler contributors.
 
-Lock v2 is a distinct authority-free graph over at most four exact
-caller-owned Semantic Package Report v2 subjects. Each subject embeds the
-report as raw canonical JSON with exact byte count and domain-separated
-digest; admission independently source-replays it. Generation rejects graph,
-identity, version, cycle, depth, edge, byte, work, capability, and target
-confusion. Capability closure is derived only from exact subjects. Ternary
-target intersection preserves any `unproven` fact.
+Lock v2 is an authority-free graph of at most four caller-owned Semantic
+Package Report v2 subjects. Each embeds raw canonical report JSON, its exact
+byte count, and a domain-separated digest; admission independently replays the
+source. Generation rejects graph, identity, version, cycle, depth, edge, byte,
+work, capability, and target confusion. Only exact subjects determine
+capability closure. Ternary target intersection retains any `unproven` fact.
 
 Work counters are deterministic logical traversal units, not allocator-byte or
 wall-clock measurements.

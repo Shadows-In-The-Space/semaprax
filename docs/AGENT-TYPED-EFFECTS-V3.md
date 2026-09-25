@@ -1,11 +1,13 @@
 # Agent typed effects v3
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 implementation.
+Audience: runtime integrators and compiler contributors.
 
-Audience: compiler contributors and runtime integrators.
+Typed effects map a checked Proposal selector to one registered host operation.
+The host is injected, and its result must match the registered types before
+the reducer sees it.
 
-The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only evidence status without changing the registry or host boundary.
+Status: **HOSTED GREEN** under the [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
+The registry and host boundary remain unchanged.
 
 `agent_lifecycle::iterative::effects::compile_typed_effects` accepts one checked
 module, an immutable BoundAgentDeployment, one Step type identity, one Proposal

@@ -5,16 +5,15 @@ only. No hosted or public-network support claim follows from this module.
 
 Audience: runtime integrators and reviewers of outbound application effects.
 
-`src/outbound_host_adapter/` joins the existing pure `std` policy packages and
-bounded HTTPS runtime at one injected host boundary. It covers typed
-GET/POST/PUT/PATCH/DELETE requests, structured operational export, signed
-webhook delivery, and a provider-neutral email envelope. The policy layer reads no environment and creates no threads or
-timers. `NativeHttpsAdapter` is the explicit physical HTTPS implementation: its
-host supplies TLS policy, while it disables ambient proxies, redirects, and
-retries. Most policy/session tests use a deterministic recording fixture and
-perform no network I/O. The separate native-adapter integration corpus talks
-only to an explicitly configured private-root loopback TLS listener; it neither
-uses a system root nor reaches a public endpoint.
+`src/outbound_host_adapter/` connects pure `std` policy packages to bounded
+HTTPS through an injected host boundary. It covers typed
+GET/POST/PUT/PATCH/DELETE, operational export, signed webhooks, and a
+provider-neutral email envelope. Policy reads no environment and starts no
+threads or timers. `NativeHttpsAdapter` performs physical HTTPS with host-supplied
+TLS policy and no ambient proxies, redirects, or retries. Most tests use a
+recording fixture without network I/O. Native-adapter integration uses only a
+configured private-root loopback TLS listener, not a system root or public
+endpoint.
 
 ## Authority and admission
 

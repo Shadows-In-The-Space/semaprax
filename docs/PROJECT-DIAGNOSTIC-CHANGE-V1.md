@@ -8,11 +8,12 @@ separately gated.
 
 Audience: agent builders, compiler contributors, and reviewers.
 
-This additive Semantic Change operation turns the existing
-[candidate typed repairs](PROJECT-CANDIDATE-DIAGNOSTICS-V1.md) into an
-exact, replayable intention. Canonical source and full Project admission remain
-authoritative. No general diagnostic repair, invalid semantic image, automatic
-selection, source publication, test execution, or runtime equivalence is claimed.
+This Semantic Change operation records an existing
+[candidate typed repair](PROJECT-CANDIDATE-DIAGNOSTICS-V1.md) as an exact,
+replayable intention. Canonical source and full Project admission remain
+authoritative. It does not claim general diagnostic repair, invalid semantic
+images, automatic selection, source publication, test execution, or runtime
+equivalence.
 
 ## Closed request
 
@@ -41,8 +42,8 @@ supplied diagnostic, source text, HIR payload, or nested repair is not accepted.
 The additive `borrow_owned_byte_field_without_staging` class requires an actual
 `SPX-T266` rejection and replaces direct lexical-root value projections under
 `core.bytes.as-slice` with authenticated `field_place` constructors. Other
-computed bases remain unsupported. The proposal is exposed only after full
-candidate admission; the source borrowing profile remains unchanged. See the
+computed bases remain unsupported. The proposal becomes available only after full candidate admission. The source
+borrowing profile stays unchanged. See the
 [attempt contract](PROJECT-CANDIDATE-DIAGNOSTICS-V1.md) for its exact scope.
 
 `ProjectCandidateAttempt::repair_catalog` now includes a compiler-derived

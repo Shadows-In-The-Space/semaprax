@@ -6,10 +6,9 @@ Status: focused exact-commit runner executed locally for subject
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-This contract turns the existing authored canonical-Git workflow regressions
-into one inspectable **local** evidence bundle. It does not broaden the workflow,
-promote an operation, or reinterpret one focused test process as a product-wide
-quality gate.
+This **local** bundle makes the authored canonical-Git workflow regressions
+inspectable. One focused test process does not widen the workflow, promote an
+operation, or establish a product-wide quality gate.
 
 ## Exact subject and runner
 

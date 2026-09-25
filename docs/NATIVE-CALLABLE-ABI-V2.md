@@ -15,10 +15,9 @@ stable ecosystem ABI, and it does not open `SPX-B104`.
 
 Callable ABI v2 binds one direct, monomorphic, `drop trivial` owned-resource
 function from [Owned resource vertical slice v1](OWNED-RESOURCE-VERTICAL-V1.md).
-The admitted signature contains `i64`, `bool`, and exact owned-resource
-inputs, and returns either `i64` or one exact owned input. Unsupported
-resources, imported finalizers, calls, aggregates, loops, callbacks, async work,
-and allocation remain outside this ABI.
+It accepts `i64`, `bool`, and exact owned-resource inputs and returns `i64` or
+one exact owned input. Unsupported resources, imported finalizers, calls,
+aggregates, loops, callbacks, async work, and allocation remain excluded.
 
 Descriptor v1 is permanently descriptor-only. A v1 blob cannot become callable
 by placing a function beside it. Callable admission requires the distinct

@@ -4,13 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Semantic Workspace Change v1 is a bounded replacements-only protocol for an
-authenticated Semantic Workspace v1. One canonical proposal names 2–16
-existing managed paths and supplies complete replacement source for each. The
-implementation validates one complete base workspace and one complete
-candidate workspace, derives full-graph delta Context, reverse Impact, Review,
-and Evidence, and can publish the exact replayed candidate through one
-exclusive `ACTIVE` pivot.
+Workspace Change v1 replaces complete source at 2–16 existing managed paths
+in an authenticated Semantic Workspace v1. It validates the full base and
+candidate workspaces, derives full-graph delta Context, reverse Impact,
+Review, and Evidence, then may publish the exact replayed candidate through
+one exclusive `ACTIVE` pivot.
 
 The protocol does not create, delete, move, or change the managed path set. It
 does not treat submitted JSON, a verification receipt, or an old invocation as

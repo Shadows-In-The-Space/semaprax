@@ -8,9 +8,9 @@ current.
 
 Audience: editor integrators, compiler contributors, and programme reviewers.
 
-This contract extends the focused saved-source Extension Host scenario with one
-real compiler-backed candidate-test task. It proves the selected local editor
-path only. It does not complete the graph-operational programme.
+V2 adds one real compiler-backed candidate-test task to the saved-source
+Extension Host scenario. It proves only this local editor path, not completion
+of the graph-operational programme.
 
 ## Exact runner
 

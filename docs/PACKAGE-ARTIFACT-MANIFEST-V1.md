@@ -5,11 +5,10 @@ Audience: package, registry, and artifact-tooling contributors.
 
 ## Purpose
 
-Package Artifact Manifest v1 binds one package coordinate and its exact
-capsule/content/API-ABI facts to one closed target profile and one exact ordered
-artifact inventory. It is the artifact-level evidence carried by [Registry
-Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md). It does not replace or alter the
-v1 registry document or snapshot.
+This manifest binds one package coordinate, its verified capsule/content/API
+facts, one closed target profile, and one ordered artifact inventory. It is the
+artifact evidence used by [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md);
+Registry-v1 remains unchanged.
 
 The schema is `semaprax.package-artifact-manifest.v1`. The compact canonical
 object contains, in order: `schema`, `package`, `version`, `capsule_digest`,
@@ -19,17 +18,9 @@ domain `semaprax.package-artifact-manifest.v1\0` followed by the exact canonical
 manifest bytes. The domain-separated digest is carried by the registry entry,
 not inside the manifest itself.
 
-`create_from_linked_build` first invokes the existing exact Build-v2 verifier
-over the submitted module, manifest, evidence, capsule, sources, resolution,
-and options. It derives `capsule_digest` from that verified receipt,
-`content_digest` from the exact independently replayed Subject-v3 whose
-embedded Report-v2 equals the root package report consumed by the verified
-build, and `api_abi_digest` by domain-separated hashing of the verified
-Build-v2 export projection. Artifact paths, roles, byte lengths,
-and SHA-256 digests are derived from the exact raw three-artifact build.
-The returned manifest exposes `derived_api_abi_digest`; the registry admission
-API uses that value to populate the consumed publication rather than requiring
-a caller to reproduce the private digest algorithm.
+`create_from_linked_build` first replays Build-v2. It derives the capsule,
+content, API, path, role, length, and SHA-256 facts from that replay and the
+matching Subject-v3; callers do not supply trusted derived values.
 
 ## Closed initial profile
 

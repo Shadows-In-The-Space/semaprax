@@ -1,25 +1,23 @@
 # Kernel-0 Rung-2 Owned Handoff v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: private implementation for R16 / #294 with the bounded local evidence
 recorded below. This is not accepted-head, hosted, full-gate, or self-hosting-rung
 evidence. Remaining acceptance gates and the exact accepted revision must be
 recorded independently.
 
-Audience: compiler contributors and reviewers of Kernel-0 ownership evidence.
-
 ## Closed subject and proof boundary
 
-The five scalar renderer sources, Kernel-0 grammar, evaluator, translation,
-and Lean theorem are unchanged. Their length/byte computation and Rust host
-assembly happen first. Neither is an owned renderer or an ownership theorem.
+The five renderer sources, grammar, evaluator, translation, and Lean theorem
+are unchanged. They compute bytes before Rust assembles them; neither step is
+an owned renderer or an ownership theorem.
 
-The production candidate then passes those exact-source authenticated bytes
-through `kernel-zero.owned-handoff.move`: an ordinary checked SEMAPRAX
-`own Bytes -> Bytes` function with one immutable move binding and that binding
-as its result. Normal source/HIR ownership verification and canonical cleanup
-replay govern it. No new ownership rule, cleanup authority, or evaluator exists.
-Rust remains the only formatter authority: only a fully settled candidate
-equal to the Rust reference may be copied into the caller's 20-byte token.
+The candidate then passes those authenticated bytes through
+`kernel-zero.owned-handoff.move`, a checked `own Bytes -> Bytes` function with
+one immutable move binding. Normal source/HIR ownership verification and
+canonical cleanup replay govern it. Rust remains formatter authority: only a
+fully settled Rust-equal candidate may enter the caller's 20-byte token.
 
 ## Synchronous admission and settlement
 

@@ -9,8 +9,8 @@ Audience: toolchain contributors, host integrators, and reviewers.
 ## Scope and unchanged interface
 
 The unpublished full toolchain owns `semaprax-full new <destination>` and the
-built-in calculator, library, and service templates. Tag archives expose that full CLI as `semaprax`;
-the standalone registry compiler does not gain private-host dependencies.
+calculator, library, and service templates. Tag archives expose that full CLI
+as `semaprax`; the standalone registry compiler gains no private-host dependency.
 See the [quickstart](QUICKSTART.md) for the user workflow and
 [Project Manifest v1](PROJECT-MANIFEST-V1.md) for checked project semantics.
 The [Public Project Scaffold Capsule v3](PROJECT-SCAFFOLD-V3.md) derives and
@@ -20,8 +20,8 @@ standalone compiler's `new`, owned by [standalone project creation
 v1](NEW-PROJECT-STANDALONE-V1.md), writes the same bytes through a bounded
 create-new route without this protocol's staging or identity re-verification.
 
-The publication protocol does not change the command grammar, lowered Project
-schema, or source semantics. The existing
+Publication changes neither command grammar, lowered Project schema, nor source
+semantics. The existing
 `--name` and closed `--template calculator|library|service` choices are
 admitted. The authority holds one of two exact fixed-arity source-directory
 shapes selected before staging: the calculator and

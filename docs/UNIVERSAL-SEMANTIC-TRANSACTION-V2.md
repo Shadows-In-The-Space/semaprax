@@ -11,9 +11,9 @@ change evidence.
 
 Universal Semantic Transaction v2 adds one authority-free
 `ReplaceExpression` transaction over an exact immutable canonical workspace.
-It reuses the authenticated expression catalogue and complete
-`ProjectCandidate::replace_expression` rebuild. It neither changes nor accepts
-the frozen Universal Semantic Transaction v1 envelope or artifact bytes.
+It reuses the authenticated expression catalogue and full
+`ProjectCandidate::replace_expression` rebuild. The frozen v1 envelope and
+artifact bytes are neither changed nor accepted by this v2 route.
 
 ## Exact envelope and operation
 
@@ -39,8 +39,8 @@ that exact revision's Project expression catalogue. Methods, generic or
 synthetic functions, contract expressions, implicit HIR nodes, ambiguous
 source joins, and caller-invented identities remain closed.
 `expected_old_expression` is the exact authenticated canonical source slice at
-the selected span. Both the workspace revision and this old slice must match
-before candidate construction.
+the selected span. Candidate construction starts only after both the workspace revision and old
+slice match.
 
 `replacement` uses the existing closed Project Candidate typed-expression
 constructor grammar. The compiler supplies no raw source or byte offset and
@@ -50,11 +50,11 @@ contracts, loans, cleanup, native emission, and Wasm emission.
 
 ## Preservation and artifacts
 
-After rebuilding, v2 independently reselects the corresponding authored AST
-position and requires the same resolved type and ownership. Every source other
-than the target source is byte-identical. In the target source, bytes outside
-the authenticated expression span are identical; the new exact canonical
-expression slice is reported in the impact and result.
+After rebuilding, v2 independently finds the corresponding authored AST
+position and requires unchanged resolved type and ownership. Other source files
+stay byte-identical. In the target file, only bytes inside the authenticated
+expression span change. Impact and result report the exact new canonical
+expression slice.
 
 V2 uses separately versioned intent, impact, review, result, evidence schemas
 and digest domains. Evidence is deterministic and replayable but carries no

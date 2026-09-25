@@ -8,12 +8,11 @@ Audience: implementers of issue #179 ("Enforce model call, token, context,
 latency, retry, failover, and cancellation budgets") and reviewers of the
 pre-dispatch admission gate it adds ahead of `live_invocation`.
 
-Implements the pre-dispatch admission gate for the model-call budget
-dimensions issue #113 does not cover: maximum call count, maximum retry
-count (with a proven-safe retry classification gating it), maximum
-failover/provider-switch count (bound to the deployment's exact ordered,
-confidentiality-checked provider list), and per-attempt/cumulative context
-and output token ceilings. Lives at `src/model_budget_policy/`.
+`src/model_budget_policy/` checks model-call limits before dispatch. Beyond
+issue #113, it covers call count, retries permitted only after a proven-safe
+classification, provider switches within the deployment's ordered and
+confidentiality-checked list, and per-attempt and cumulative context/output
+token ceilings.
 
 ## Relationship to #113 and `live_invocation`
 

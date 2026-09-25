@@ -6,11 +6,11 @@ The broader workspace lifecycle remains Partial.
 
 Audience: embedding hosts, local agent workspace integrators and compiler contributors.
 
-Unfinished typed drafts can be stored independently of the original checkout
-and explicitly selected when a workspace session starts. Storage retains the
-[source-backed draft archive](PROJECT-CANDIDATE-DRAFT-ARCHIVE-V1.md), including
-its canonical original sources, valid intention history and pending selectors.
-It does not persist unchecked HIR, publish source or complete unresolved holes.
+Unfinished typed drafts can be stored outside their original checkout and
+explicitly selected at workspace-session startup. Storage keeps the
+[source-backed draft archive](PROJECT-CANDIDATE-DRAFT-ARCHIVE-V1.md): original
+canonical sources, valid intention history and pending selectors. It neither
+stores unchecked HIR nor publishes source or fills unresolved holes.
 
 ## Typed store API
 
@@ -31,10 +31,9 @@ pub fn load_draft(
 
 The receipt has private fields and borrowed `archive_digest()`, `draft_digest()`
 and `base_revision()` getters. It contains no root, file handle, approval or
-reusable authority. Persistence fully replays the archive before opening the
-root and prepares receipt allocations before publication. Loading restores the
-draft while the selected store input is held, then authenticates its exact
-bytes and inventory again before returning the draft.
+reusable authority. Persistence replays the complete archive before opening the root and allocates
+the receipt before publication. Loading holds the selected store input while
+restoring the draft, then rechecks its exact bytes and inventory before return.
 
 The implementation shares the existing private archive-store byte transport.
 Its [root, lock, inventory and publication contract](CANDIDATE-ARCHIVE-STORE-V1.md)

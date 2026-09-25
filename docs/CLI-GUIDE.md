@@ -4,64 +4,53 @@ Status: public alpha user guide.
 
 Audience: language users running the compiler locally or from automation.
 
-SEMAPRAX exposes a standalone `semaprax` compiler and, in source checkouts, an
-unpublished `semaprax-full` toolchain for host-backed workflows such as project
-creation. The standalone compiler is enough to format, check, run, inspect, and
-build existing source and projects.
+Use `semaprax` for ordinary source and project work. A source checkout can
+also build `semaprax-full`, which adds private host-backed operations. See
+[Install](INSTALL.md) if a command is missing from your binary.
 
 ## Find the exact command shape
 
-Start from the guided overview. It is one screen: the commands for writing,
-checking, running, inspecting, and changing programs, grouped by task, each
-with its purpose:
+Start with the short command overview:
 
 ```sh
 semaprax --help
 ```
 
-List every command the installed binary accepts, including the protocol
-surfaces intended for tool authors:
+List every command your installed binary accepts:
 
 ```sh
 semaprax help all
 ```
 
-Print the compiler-checked language quick reference, the one-page card of
-admitted shapes, the diagnostics that habits from other languages trigger, and
-their fixes, without a source checkout:
+Get the compiler-checked language card without a source checkout:
 
 ```sh
 semaprax help language
 ```
 
-When the compiler has already supplied a stable diagnostic code, request only
-its indexed correction, or list the exact codes that have compact help:
+Look up a diagnostic code or list the codes with short help:
 
 ```sh
 semaprax help diagnostic SPX-T208
 semaprax help diagnostic codes
 ```
 
-Matching is exact and case-sensitive. The response comes from the diagnostic
-table in the compiler-checked quick reference; it does not load the full card.
+Codes are exact and case-sensitive.
 
-Print the generated standard-library catalog, every `std.*` function with its
-signature and contracts, without a source checkout:
+Find standard-library functions and their contracts:
 
 ```sh
 semaprax help library
 ```
 
-When you know a module, declaration name, or stable identity, request only
-that exact generated entry to avoid reading the whole catalog:
+Ask for one entry when you know its name:
 
 ```sh
 semaprax help library compare
 semaprax help library std.core.compare
 ```
 
-List the language card's stable topics or print only one compiler-checked
-section instead of transferring the complete card:
+Read one language-card topic:
 
 ```sh
 semaprax help language topics
@@ -69,9 +58,8 @@ semaprax help language scalars
 semaprax help language ownership
 ```
 
-Print every canonical declaration shape from the committed examples, or ask
-for only one exact shape. A kind returns its smallest generated exemplar;
-`path#stable-id` disambiguates identities reused by multiple examples:
+Find a canonical declaration example. A kind returns its smallest example;
+`path#stable-id` distinguishes repeated identities:
 
 ```sh
 semaprax help shapes
@@ -80,8 +68,7 @@ semaprax help shapes calculator.add
 semaprax help shapes examples/calculator.spx#app.main
 ```
 
-Show the exact accepted form of one command without reading source files,
-probing tools, or starting a build:
+Check the accepted arguments for one command:
 
 ```sh
 semaprax check --help
@@ -89,13 +76,12 @@ semaprax build --help
 semaprax help context
 ```
 
-The standalone binary intentionally omits private-host commands and targets
-that it cannot execute. If a command shown in source-install documentation is
-absent, check which binary you installed before debugging the project.
+The standalone binary omits private host commands. If help does not show a
+command, confirm which binary you installed before debugging the project.
 
 ## Work on one source file
 
-A short edit loop checks formatting before semantic verification:
+A short edit loop:
 
 ```sh
 semaprax fmt examples/meaning.spx --check
@@ -103,30 +89,20 @@ semaprax check examples/meaning.spx
 semaprax run examples/meaning.spx
 ```
 
-Single-file `run` evaluates `@id("app.main")` in the bounded reference
-interpreter, with no compiler or target process. `--max-steps`, `--max-bytes`,
-and `--json` apply to this route. Use `run <file> --native` only when you
-specifically need the generated C11 executable path. A module whose authority
-is exactly `permit { process.stdout.write }` uses the success-published bounded
-stdout interpreter profile automatically, so the language-card example is
-directly runnable.
+By default, single-file `run` evaluates `@id("app.main")` in the bounded
+reference interpreter, not a generated executable. Set `--max-steps` and
+`--max-bytes` to control limits and `--json` for machine-readable results.
+Choose `--native` to run the generated C11 executable. The exact
+`permit { process.stdout.write }` profile uses bounded stdout publication.
 
-`fmt <file> --check` reports non-canonical source without rewriting it. Run
-`fmt <file>` without `--check` when you want the compiler to rewrite that file
-canonically. Write-capable formatting rejects symlink/reparse aliases for a
-source, manifest, or project directory as `SPX-J102`, consistently with
-Project input selection. `fmt` also takes a project directory or
-`semaprax.toml`: `fmt . --check` names every drifting source and its first
-differing line, in manifest order, and `fmt .` rewrites them, parsing every
-file before writing any. Canonical expression formatting is compact: a
-`match` remains on one line even when its source arms span several lines. `//`
-comments survive formatting: each is printed on its own line above the
-declaration, field, or statement it precedes, or right after the one it
-followed; [canonical comments](CANONICAL-COMMENTS-V1.md) owns the exact
-placement rules and lists the routes that preserve comments.
+Use `fmt <file> --check` to report formatting changes without writing, or
+`fmt <file>` to write canonical source. Both accept a project directory or
+`semaprax.toml`. For projects, `fmt . --check` lists differences in manifest
+order. `fmt .` parses every file before rewriting any. Write-capable formatting rejects path aliases
+with `SPX-J102`. The formatter keeps `//` comments; the
+[comment contract](CANONICAL-COMMENTS-V1.md) defines exact placement.
 
-Inspect checked meaning by stable identity rather than searching formatted
-source text:
+Inspect checked meaning by stable identity:
 
 ```sh
 semaprax graph examples/meaning.spx
@@ -134,13 +110,11 @@ semaprax context examples/meaning.spx app.main --depth 1
 semaprax context examples/calculator-project calculator.add --direction both --depth 1 --max-bytes 2048 --max-nodes 16
 ```
 
-`graph` and `context` produce deterministic JSON suitable for inspection or a
-caller-owned file. Redirecting that output is the caller's publication action;
-the query itself does not modify the source. A Project directory or manifest
-selects authenticated cross-file context; its six structural edge families do
-not accept the single-file `--filters` option. Its compact positional Project
-schema retains exact revisions, traversal, truncation, and frontier facts while
-avoiding repeated per-node and per-edge field names.
+Choose `graph` for the whole checked graph or `context` for a bounded answer
+about one identity. Both return deterministic JSON without changing source.
+Project inputs authenticate cross-file context. Project `context` does not
+accept single-file `--filters`; its compact schema still records revision,
+traversal, and truncation.
 
 Search declarations by what they are, what they use, and what they call:
 
@@ -151,13 +125,10 @@ semaprax query examples/calculator-project --id calculator.add
 semaprax query examples/calculator-project --calls calculator.add
 ```
 
-Each match is a declaration of the checked module with its identity and
-canonical header; `--calls <id>` lists the callers of a declaration and
-`--called-by <id>` its callees, from the same call index `impact` uses.
-Selecting a Project directory or `semaprax.toml` searches every authenticated
-source and prepends the owning path. Its call predicates cross module
-boundaries, so agents can locate a library function and all retained callers
-without transferring the complete Project graph.
+Each match includes a checked declaration's identity and canonical header.
+`--calls <id>` finds callers; `--called-by <id>` finds callees. Project queries
+search every authenticated source, including cross-module calls, without
+transferring the whole graph.
 
 Render the module's documentation from the same checked facts:
 
@@ -166,15 +137,12 @@ semaprax doc examples/meaning.spx
 semaprax doc examples/meaning.spx --json
 ```
 
-`doc` prints a Markdown page of every declaration: its `@id`, signature,
-ownership modes, effects, contracts, members, and the `//` comments written
-above it, bound to the graph revision `graph` prints for the same file.
-`--json` emits the same facts as one `semaprax.doc.v1` document for tools.
-[Documentation projection](DOC-PROJECTION-V1.md) owns the layout and the gate
-that keeps the page and the graph naming the same declarations.
+`doc` renders checked declarations, signatures, contracts, effects, and source
+comments. `--json` returns the same facts as a `semaprax.doc.v1` document.
+See [Documentation projection](DOC-PROJECTION-V1.md) for the exact schema.
 
-Replay any evidence capsule through one verb. The capsule's `schema` selects
-the verifier, and the receipt is the owning route's own bytes:
+Replay an evidence capsule without granting it write authority. Its `schema`
+selects the verifier:
 
 ```sh
 semaprax patch-evidence examples/meaning.spx change.spatch > evidence.json
@@ -182,7 +150,7 @@ semaprax verify examples/meaning.spx change.spatch evidence.json
 semaprax verify semaprax.toml image.json
 ```
 
-Compile an agent definition and read its graph without running anything:
+Inspect an agent definition without running it:
 
 ```sh
 semaprax agent inspect agent.json
@@ -194,8 +162,8 @@ the fail-closed selection codes.
 
 ## Work on a project
 
-From a directory containing `semaprax.toml`, the manifest argument can be
-omitted. Keeping it explicit is useful in scripts and from parent directories:
+From a project directory, you can omit `semaprax.toml`. Name it explicitly in
+scripts or when working from another directory:
 
 ```sh
 semaprax check semaprax.toml
@@ -205,50 +173,36 @@ semaprax build semaprax.toml --target web -o dist/web
 semaprax lock semaprax.toml
 ```
 
-A directory operand means the `semaprax.toml` inside it, so
-`semaprax check examples/calculator-project`, `semaprax run .`, and
-`semaprax lock .` are the same as naming the manifest. Only `--manifest-path`
-is taken literally.
+A directory operand selects its `semaprax.toml`, so `semaprax run .` works.
+Only `--manifest-path` is taken literally.
 
-Use each command's scoped help before selecting a target or profile; the
-available build targets differ between the standalone and full toolchains.
-Commands that list `--json` in scoped help provide their structured form for
-automation.
+Check scoped help before choosing a target: standalone and full toolchains
+have different target catalogs. Commands listing `--json` offer structured
+output for automation.
 
-`build` has separate target catalogs for its two input classes. A source file
-admits `native`, `native-callable`, `web`, and `wasm`; a project admits
-`native`, `web`, `wasm`, `npm`, and `oci`, plus `rust` in the full toolchain.
-An unsupported-target diagnostic lists only the catalog the current input and
-toolchain can execute. `wasm` is an exact alias of `web`: both publish the
-same Web package directory, including `app.wasm`, rather than a bare Wasm
-file. `oci` only accepts the Project v1 scalar profile today and publishes a
-deterministic, offline OCI Image Layout carrying that project's `app.wasm` as
-its sole content artifact -- see
+| Input | Targets |
+| --- | --- |
+| Source file | `native`, `native-callable`, `web`, `wasm` |
+| Project | `native`, `web`, `wasm`, `npm`, `oci`; full toolchain also offers `rust` |
+
+`wasm` is an alias for `web`; both create a package directory with `app.wasm`,
+not a bare Wasm file. `oci` currently accepts only the Project v1 scalar
+profile and publishes an offline OCI Image Layout; see
 [OCI Deployable Artifact v1](OCI-DEPLOYABLE-ARTIFACT-V1.md). `-o` and
-`--output` are equivalent.
+`--output` mean the same thing.
 
-When omitted, a source target defaults to `native` and its destination to
-`<source-stem>.out` beside the source. A project target defaults to `web`; its
-destination defaults inside the project root to `<name>-web` for `web` or
-`wasm`, `<name>-npm` for `npm`, `<name>-oci` for `oci`, `<name>-rust` for
-`rust`, and `<name>-out` plus the platform executable suffix for `native`.
-`build --json`
-prints one success object with `status`, `target`, `product`, and `output`
-(plus `manifest_sha256` for a native-callable bundle); build diagnostics use
-the ordinary one-diagnostic-per-line JSON form.
+Without a target, source files build as `native` beside the source and
+projects build as `web` inside the project. Use `-o` when you want an explicit
+destination. `build --json` reports `status`, `target`, `product`, and
+`output`; native-callable bundles also report `manifest_sha256`.
 
-Every explicit single-file build output is create-new. Native builds reserve
-the exact destination before invoking the compiler and publish through that
-retained file; Web/Wasm builds atomically create a fresh package directory.
-An existing file, directory, symlink, or concurrent winner is rejected with
-`SPX-I307` and left unchanged. An invalid or unavailable parent is rejected as
-`SPX-I301`; builds never merge into an existing directory or overwrite their
-own `.spx` input.
+Explicit single-file build outputs must be new. An existing path fails with
+`SPX-I307`; an invalid parent fails with `SPX-I301`. Builds do not merge into
+an existing directory or overwrite source.
 
-For command-profile projects, `run` deliberately executes the project's
-ordinary entry rather than synthesizing process input for its command
-function. Human output includes a note naming both identities and points to
-the built native and Web/npm adapters that exercise the command function.
+For command-profile projects, `run` executes the ordinary project entry, not
+the process-input command function. The output points to the built adapters
+that exercise that function.
 
 Declare and stage dependencies without any implicit network access:
 
@@ -258,36 +212,29 @@ semaprax fetch cache vendor/examples.meaning-1.0.0.subject.json
 semaprax resolve . --target native64 --cache cache --write
 ```
 
-`add` rewrites a table-layout `semaprax.toml` canonically with the new
-`[dependencies]` row and changes nothing else; `fetch` replays each named
-Subject-v3 envelope and files it in the content-addressed cache by digest;
-`resolve` then selects from exactly that cache.
-[Unified CLI v1](UNIFIED-CLI-V1.md) owns both grammars and their fail-closed
-codes.
+`add` updates the manifest's dependency table. `fetch` verifies each named
+Subject-v3 envelope and files it by digest. `resolve` selects only from that
+explicit cache; none of these commands discovers a registry. See
+[Unified CLI v1](UNIFIED-CLI-V1.md) for exact inputs and refusal codes.
 
 ## Diagnose command-line errors
 
-Command-line grammar errors exit without compiling the input. Start with
-scoped help for the command that rejected the invocation:
+Argument errors exit before compilation. Start with the command's help:
 
 ```sh
 semaprax fmt --help
 semaprax context --help
 ```
 
-A uniquely recognizable command typo includes capability-aware guidance, such
-as ``unknown command `chek`; did you mean `check`?``. The standalone compiler
-does not reveal private full-toolchain commands through suggestions.
-If a known command's arguments are invalid, the diagnostic points directly to
-its scoped usage, for example `semaprax check --help`.
+An unambiguous typo may suggest a command, such as
+``unknown command `chek`; did you mean `check`?``. The standalone binary does
+not suggest private commands. For a known command with bad arguments, follow
+the scoped-help hint in its diagnostic.
 
-Compiler diagnostics carry stable `SPX-...` codes so tests and tools can bind
-to the diagnostic kind instead of matching an entire human-readable message.
-Human-readable diagnostics include `path:line:column` when the compiler knows
-the source location; `--json` remains the stable automation interface.
-SEMAPRAX remains alpha, so consult the release notes and versioned
-references before treating a diagnostic, schema, or ABI as stable across
-releases.
+Compiler errors have `SPX-...` codes. Use those codes in tests and tools,
+not whole English messages. Human output includes `path:line:column` where
+available; use `--json` for automation. SEMAPRAX is alpha, so check release
+notes before assuming a cross-release diagnostic or ABI guarantee.
 
 ## Source checkout binaries
 
@@ -298,10 +245,8 @@ cargo install --locked --path .
 cargo install --locked --path crates/semaprax-toolchain
 ```
 
-The first command installs the standalone `semaprax` binary. The second
-installs the unpublished `semaprax-full` binary. Tagged release archives expose
-their full CLI as `semaprax`; follow the archive's release documentation rather
-than installing the private source package beside it.
+The first command installs standalone `semaprax`; the second installs
+unpublished `semaprax-full`. A release archive names its full CLI `semaprax`.
 
 For a complete first project, continue with the executable
 [quickstart](QUICKSTART.md). The exact capability boundary and byte-level help

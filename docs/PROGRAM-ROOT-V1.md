@@ -6,11 +6,11 @@ Status: implemented additive SEG-02 foundation; **HOSTED GREEN** under the
 Audience: compiler contributors, semantic-service authors, Agent-runtime
 designers, and reviewers of canonical semantic identity.
 
-ProgramRoot v1 is the content-addressed, source-owned root of the emerging
-Semantic Execution Graph. It is an additive segmented projection of an exact
-[Canonical Semantic Workspace Revision v1](CANONICAL-SEMANTIC-WORKSPACE-REVISION-V1.md),
-not a competing Project, workspace, image, or graph representation. Canonical
-`.spx` and the admitted `ProjectRevision` remain its source of truth.
+ProgramRoot v1 is the source-owned, content-addressed root of the Semantic
+Execution Graph. It segments one exact
+[Canonical Semantic Workspace Revision v1](CANONICAL-SEMANTIC-WORKSPACE-REVISION-V1.md)
+without replacing the Project, workspace, image, or graph. Canonical `.spx`
+and the admitted `ProjectRevision` remain authoritative.
 
 ## Public API and schemas
 

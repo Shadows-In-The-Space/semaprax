@@ -9,11 +9,11 @@ broader product completion remain separately gated.
 Audience: compiler contributors, local tool hosts, agent clients, and reviewers
 of process-resident semantic service boundaries.
 
-This transport exposes one Persistent Incremental Semantic Workspace Service
-v1 through repeated JSON-RPC 2.0 lines in one `semaprax` process. One startup
-Project is authenticated and retained for the complete process lifetime. The
-session delegates query, transaction validation, and refresh to that one
-service instead of rebuilding a one-shot service per request.
+This transport serves one Persistent Incremental Semantic Workspace Service
+v1 through JSON-RPC 2.0 lines in one `semaprax` process. It authenticates one
+Project at startup and retains it for the process lifetime. Queries,
+transaction validation, and refresh reuse that service instead of creating a
+new one per request.
 
 It is a local single-client stdio adapter, not LSP, a socket, daemon, shared
 multiprocess service, editor protocol, or durable database. The separately

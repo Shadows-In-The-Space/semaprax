@@ -6,17 +6,16 @@ and graph-operational completion remain Partial.
 
 Audience: agent builders, typed-client authors, and compiler contributors.
 
-Image Protocol v5 derives capabilities, request descriptors, schemas, and client
-builders from the exact host-selected method registry. No request, generated
-helper, or schema can grant preparation, diagnostics, tests, builds, or source
-commit authority. Existing v1–v4 discovery and client helpers remain unchanged.
+V5 generates capabilities, request descriptors, schemas, and client builders
+from the methods the host selected. Requests and generated code cannot grant
+candidate preparation, diagnostics, tests, builds, or source commits. V1–v4
+discovery and client helpers remain unchanged.
 
 A startup-attached [Package Semantic Graph](PACKAGE-SEMANTIC-GRAPH-V1.md)
-selects package summary/consumer methods and their closed payload schemas.
-Instructions, typed clients and MCP tools reflect that actual attachment;
-default sessions cannot request package attachment or gain those methods.
-Package revisions identify independent verified subjects, with no inferred
-association to the session's Project image.
+adds package summary and consumer methods with closed payload schemas.
+Instructions, typed clients, and MCP tools reflect that attachment. Default
+sessions cannot request it or gain those methods. Package revisions identify
+independent verified subjects, not an inferred link to the Project image.
 
 ## Schema bundle
 

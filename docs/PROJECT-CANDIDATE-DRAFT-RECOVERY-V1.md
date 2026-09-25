@@ -8,11 +8,11 @@ separately gated.
 
 Audience: embedding hosts, agent client authors and compiler contributors.
 
-Draft recovery saves pending body/expression selectors together with the exact
-history of their last fully checked candidate. Restoring it rebuilds that valid
-history from an independently admitted original source base, then recreates
-every hole through the ordinary draft APIs. It never admits unfinished meaning
-as source, HIR, candidate evidence or publication authority.
+Draft recovery saves pending body/expression selectors and the exact history
+of their last fully checked candidate. Restore starts from an independently
+admitted original source base, rebuilds that history, then recreates each hole
+through the ordinary draft APIs. Unfinished meaning never becomes source, HIR,
+candidate evidence, or publication authority.
 
 ## Library and capsule
 
@@ -47,8 +47,8 @@ source archive, serialized context, approval, session policy or trusted HIR.
 Each body selector is exactly
 `{kind:"function_body",hole_id,target}`. Each expression selector is exactly
 `{kind:"expression",hole_id,target,expression_id}`. Expression IDs belong to the
-reconstructed last-valid revision. After partial fills, export records the
-remaining selectors already remapped by the normal fill route.
+reconstructed last-valid revision. After partial fills, export saves the
+remaining selectors as already remapped by the normal fill route.
 
 The additive [Contract Expression Holes](PROJECT-CANDIDATE-CONTRACT-HOLES-V1.md)
 row is exactly `{kind:"contract_expression",hole_id,target,expression_id}`.

@@ -8,10 +8,10 @@ separately gated.
 
 Audience: compiler contributors and agents editing immutable Project candidates.
 
-`add_variant_case` appends one explicitly identified case containing exactly
-one owned `Bytes` field to an existing variant. Canonical `.spx` remains the
-authority. The operation does not construct the new case, add or rewrite a
-match arm, edit an existing constructor, or grant source/publication authority.
+Use `add_variant_case` to append one explicitly identified case with exactly
+one owned `Bytes` field to an existing variant. Canonical `.spx` remains
+authoritative. This does not construct the case, add or rewrite match arms,
+edit existing constructors, or grant source/publication authority.
 
 ## Closed request
 
@@ -36,9 +36,8 @@ use the existing bounded explicit-ID grammar. Their display names use the
 bounded source identifier grammar. Both identities and both display names must
 be fresh in the authenticated authored type-member inventory.
 
-The structural constructor schema also names `string` so the compiler can
-return the stable semantic refusal `SPX-G516`. It is not an admitted v1 field
-type. String-bearing variants remain outside the existing interpreter, native,
+The constructor schema names `string` only so the compiler can return the
+stable semantic refusal `SPX-G516`. V1 does not admit it as a field type. String-bearing variants remain outside the existing interpreter, native,
 and Core Wasm flat owned-variant profile; this operation does not widen that
 runtime boundary.
 

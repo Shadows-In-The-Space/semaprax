@@ -14,18 +14,17 @@ semapraxd --stdio [--manifest-path semaprax.toml] \
   [--max-request-bytes N] [--max-response-bytes N]
 ```
 
-The daemon authenticates the manifest, every declared source, and their held
-directory/file identities once. The same Phase-A build produces the linked
-entry/test HIR, one complete declared-project semantic graph, and one typed
-analysis index. Repeated graph, context, and test requests use that retained
-state without parsing, resolving, linking, or reading another source.
+The daemon authenticates the manifest, all declared sources, and their held
+directory/file identities once. One Phase-A build produces the linked entry/test
+HIR, complete declared-project semantic graph, and typed analysis index. Later
+graph, context, and test requests reuse that state; they do not parse, resolve,
+link, or read another source.
 
 This is `semaprax.agent-transport.v2`, separate from the byte-frozen
 single-file `semaprax.agent-transport.v1` served by `semaprax serve`.
 
 The optional `--allow-project-rename` profile is a separate additive protocol,
-`semaprax.agent-transport.v3`. Default v2 remains read-only and does not report
-or route its methods. See [Project Rename Transaction
+`semaprax.agent-transport.v3`. Default v2 stays read-only: it neither advertises nor routes those methods. See [Project Rename Transaction
 v1](PROJECT-RENAME-TRANSACTION-V1.md).
 
 ## Framing and lifecycle

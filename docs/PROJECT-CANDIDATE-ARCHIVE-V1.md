@@ -29,8 +29,8 @@ The closed `semaprax.project-candidate-archive.v1` object contains:
 - `candidate_digest`, `candidate_project_revision`, and `archive_digest`;
 - `source_authority:false`, `approval_authority:false`, and `trusted_hir:false`.
 
-No absolute project root, held file handle, serialized HIR, host permission,
-approval, or live-source freshness claim is imported. Logical source paths are
+Restoration imports no absolute project root, held file handle, serialized HIR,
+host permission, approval, or claim that live source is fresh. Logical paths are
 validated against the canonical manifest and used only for in-memory compiler
 admission; they do not select filesystem operations. Restoring a rebased
 candidate uses that candidate's new base. The archive preserves the recovery
@@ -41,8 +41,9 @@ The archive digest hashes `semaprax.project-candidate-archive.payload.v1\0`,
 the little-endian u64 payload byte length, and the canonical payload including
 terminal LF with `archive_digest` omitted. It is content addressing, not a
 signature or approval. Both expected archive and candidate digests are required.
-A newly self-hashed object still requires full compiler admission and exact
-replay; hashes alone never establish that a source or candidate is valid.
+Even an object with a matching self-computed hash must pass full compiler
+admission and exact replay. A hash alone does not establish source or candidate
+validity.
 
 Restore validates selectors, raw resource bounds, closed schema/compiler facts,
 canonical byte spelling, and content digest. It validates manifest source order

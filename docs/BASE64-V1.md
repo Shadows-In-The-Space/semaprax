@@ -7,10 +7,9 @@ unpadded or URL-safe alphabets remain out of scope.
 Audience: language users, compiler contributors, standard-library authors, and
 backend implementers.
 
-This profile is the bundled `std.encoding.base64` package: pull-based padded
-standard Base64 *encoding* over a borrowed byte view. It introduces no buffer,
-no owned byte type, and no allocation; a caller reads each encoded digit with
-`base64_byte(view, index)` and writes it wherever it chooses, in any order.
+This bundled `std.encoding.base64` package provides pull-based padded standard
+Base64 *encoding* over a borrowed byte view. It adds no buffer, owned byte type,
+or allocation; callers read each digit with `base64_byte(view, index)`.
 [Standard Library v1](STANDARD-LIBRARY-V1.md) owns the package inventory this
 profile extends.
 

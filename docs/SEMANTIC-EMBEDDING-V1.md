@@ -7,31 +7,23 @@ over SEMAPRAX programs, plus compiler contributors working on issue #203
 ("publish a small stable Semaprax embedding API with explicit host
 capabilities") and its dependency #200.
 
-Semantic Embedding v1 (`../src/semantic_embedding/`) is a small,
-capability-gated boundary for computing a vector representation of
-caller-supplied bytes: an explicit [`EmbeddingCapability`](../src/semantic_embedding/capability.rs),
-an injected [`EmbeddingProvider`](../src/semantic_embedding/provider.rs)
-trait a real deployment binds to an actual model transport, and a kernel
-enforcement function
-([`kernel::embed`](../src/semantic_embedding/kernel.rs)) that checks
-cancellation and a caller-declared input-size ceiling before a provider is
-ever reached, then re-validates a settled vector's length and finiteness
-before trusting it.
+Semantic Embedding v1 computes a vector from caller-supplied bytes through an
+explicit [`EmbeddingCapability`](../src/semantic_embedding/capability.rs) and
+injected [`EmbeddingProvider`](../src/semantic_embedding/provider.rs). A real
+deployment supplies the model transport. [`kernel::embed`](../src/semantic_embedding/kernel.rs)
+checks cancellation and input size before dispatch, then checks the returned
+vector's length and finiteness before using it.
 
 ## What this is a slice of, and what it is not
 
-Issue #203 asks for a much larger surface: opaque compiler/session
-handles, explicit Source/Project load and refresh, check/format/graph/
-query/context, candidate validate/replay, deterministic interpreter
-execution, version/feature negotiation, and eventually a C ABI. None of
-that lives in this module or this document. This is one narrow,
-honestly-scoped slice: the "explicit provider/capability injection" bullet
-of #203's "In scope" list, applied specifically to computing an embedding
-vector, because that is the one sub-surface of #203 this tranche's file
-lease and no-new-dependency constraint could deliver with real,
-demonstrable evidence rather than an unverifiable broader claim. See
-"Honesty bar" below for why a narrower, honestly labelled deliverable was
-chosen over a wider one that could not be backed by evidence.
+Issue #203 also calls for compiler/session handles, Source/Project load and
+refresh, check/format/graph/query/context, candidate validate/replay,
+deterministic interpreter execution, version/feature negotiation, and an
+eventual C ABI. This module implements none of those. It covers only explicit
+provider/capability injection for embeddings, the part this tranche could
+verify under its file lease and no-new-dependency constraint. The "Honesty bar"
+below records why
+the larger API is not claimed.
 
 ## Why a provider seam, not a real model call
 

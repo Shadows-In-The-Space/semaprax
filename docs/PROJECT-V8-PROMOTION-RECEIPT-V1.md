@@ -8,18 +8,18 @@ broader product completion remain separately gated.
 
 Audience: release-gate implementers, evidence producers, and reviewers.
 
-Project v8 Promotion Receipt v1 records one closed set of explicit,
-caller-owned observations for the bounded `owned-data-api.v1` programme. It
-does not execute a gate, inspect CI, discover a tool, attest a host, decide
-support, publish a package, or promote a completion-matrix row.
+Project v8 Promotion Receipt v1 records a closed set of explicit observations
+supplied by the caller for the bounded `owned-data-api.v1` programme. It does
+not run gates, inspect CI, discover tools, attest hosts, decide support, publish
+packages, or promote a completion-matrix row.
 
 The schema is `semaprax.project-v8-promotion-receipt.v1`. A receipt is one
 canonical JSON line with one terminal LF and at most 1 MiB. Unknown, duplicate,
 missing, surplus, reordered, noncanonical, nested-over-depth, or oversized data
 rejects. Its digest is SHA-256 over the domain
 `semaprax.project-v8-promotion-receipt.v1` plus a NUL byte and the complete
-canonical receipt bytes. The digest is integrity data, not a signature,
-provenance, or host attestation.
+canonical receipt bytes. The digest checks integrity; it does not supply a signature, provenance, or
+host attestation.
 
 ## Exact subject and artifact binding
 

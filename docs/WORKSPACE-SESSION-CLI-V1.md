@@ -11,11 +11,11 @@ Audience: local embedding hosts and semantic agent client authors.
 semaprax serve-workspace <manifest> <host-policy.json>
 ```
 
-This command opens Image Agent Protocol v5 over bounded NDJSON stdin/stdout.
-There is no startup banner. The trusted host selects the exact manifest and
-reads one regular bounded policy file before requests begin. Relative manifest
-paths are resolved against the host working directory; normal Project path
-authentication still rejects aliases and unauthorized source shapes.
+This command serves Image Agent Protocol v5 over bounded newline-delimited
+JSON (NDJSON) on stdin/stdout, with no startup banner. Before requests begin,
+the trusted host selects the exact manifest and reads one regular bounded
+policy file. Relative manifest paths use the host working directory. Normal
+Project path authentication still rejects aliases and unauthorized source shapes.
 
 `semaprax serve-workspace-mcp <manifest> <host-policy.json>` uses the same
 startup loader and every closed policy version below, then wraps the configured
@@ -53,11 +53,11 @@ compiler-created source ASTs for authenticated live refresh. V1 remains closed:
 adding `frontend_cache` to a v1 policy rejects rather than silently enabling it.
 Missing, null, string, or numeric cache selections in v2 also reject.
 
-The v2 AST-cache selection changes frontend work only. It grants no methods, paths, store,
-process, or publication authority; no request can turn it on or off. Cache hits
-still require exact source bytes and complete semantic/link/profile admission.
-There is no serialized HIR loading, cross-process warm reuse, filesystem cache
-root, or measured speedup claim. See
+The v2 AST cache changes only frontend work. Requests cannot turn it on or off,
+and it grants no methods, paths, store, process, or publication authority. A
+cache hit still requires exact source bytes and complete semantic/link/profile
+admission. This is not serialized HIR loading, cross-process warm reuse, a
+filesystem cache root, or a measured speedup claim. See
 [Workspace Frontend Cache v1](IMAGE-WORKSPACE-FRONTEND-CACHE-V1.md) for fresh
 snapshot authentication, transactional cache adoption, and actual work reports.
 
@@ -99,10 +99,10 @@ This additional selection reuses only compiler-created checked module HIR under
 exact source, context, dependency, and complete synthetic-AST matching. It still
 requires fresh filesystem/source authentication, full cross-file checks,
 linking, and Project profile admission. It grants no methods, cache-root path,
-file writes, build/test authority, or source approval. Refresh forks cache state;
-preview and failure discard the fork, and only successfully rendered and finally
-authenticated refresh adopts it. Neither requests nor recovered archives can
-select the strategy. The existing Git startup-only approval guard is unchanged.
+file writes, build/test authority, or source approval. Refresh works on a fork of the cache. Preview and failure discard that fork;
+only a successfully rendered refresh that passes final authentication adopts
+it. Neither requests nor recovered archives can choose the strategy. The
+startup-only Git approval guard stays unchanged.
 
 Semantic-cache refresh work uses the separate
 `semaprax.project-semantic-cache-work.v1` schema with actual resolver-call and
@@ -166,14 +166,14 @@ approval digest is supplied independently by the host, never read from an RPC
 or silently inferred from a candidate capsule. `source-commit/status` exposes a
 public correlation handle for that existing approval; it does not grant one.
 
-The supported CLI workflow is to prepare, inspect and export a candidate first,
-then start a separate commit-enabled session with the exact host-approved
-candidate digest, restore its exact history and invoke `candidate/commit` with
-the retained candidate and approval handles. V5 host approvals remain restricted
-to startup; requests cannot approve themselves or replace the fixed Git policy.
-The process provider's existing lifetime deadline and command/I/O limits start
-when it opens, so publication must occur within that bounded window. There is
-no automatic deadline reset, repository replacement or authority refresh.
+First prepare, inspect and export a candidate. Then start a separate
+commit-enabled session with the exact host-approved candidate digest, restore
+its exact history, and call `candidate/commit` with the retained candidate and
+approval handles. V5 host approvals are startup-only: requests cannot approve
+themselves or replace the fixed Git policy. The process provider's lifetime
+deadline and command/I/O limits begin when it opens, so publication must finish
+within that window. Deadlines, repositories and authority are not automatically
+reset, replaced or refreshed.
 
 Git objects/ref publication does not rewrite raw checked-out source. The
 existing independently replayed Git authority owns its one ref pivot, consumes

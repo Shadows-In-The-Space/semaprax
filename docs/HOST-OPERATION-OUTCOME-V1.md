@@ -10,11 +10,11 @@ agent once admitted, and anyone hitting issue #228's gap in the meantime
 
 ## Why this exists
 
-Issue #228 names an exact hole in the legacy host-operation route.
-`file_write_atomic` still aborts the enclosing invocation on provider failure,
-while the additive `file_write_atomic_checked` route returns a classified
-publication outcome. The checked route is limited to the filesystem family;
-network operations remain outside this slice. For the legacy operation:
+Issue #228 addresses a limitation of the legacy host-operation route:
+`file_write_atomic` aborts the enclosing invocation on provider failure.
+The added `file_write_atomic_checked` route instead returns a classified
+publication outcome. It covers only filesystem operations, not network
+operations. The legacy operation behaves as follows:
 
 - `FileFailure` remains the ordinary provider-error `Result` and has no
   `PublishUncertain` variant. The checked provider API instead returns
@@ -60,11 +60,10 @@ lifecycle codes, the idempotent-enqueue three-way outcome
 (`DURABLE-JOBS-V1.md`, "Idempotent enqueue"), and the `provider_outcome`
 adapter in `tests/project/standard_library/provider_outcomes.rs` all follow
 this shape already, all composed entirely in checked SEMAPRAX with no new
-host operation. The gap #228 names is narrower: the legacy host-operation status path cannot
-hand back a closed outcome that includes a genuinely uncertain case. The new
-checked operation has a value-returning path whose domain-specific outcome
-classes do not reach the fail-stop path; malformed input, capability failure,
-and ABI/provider-contract defects still do.
+host operation. The legacy status path cannot return a closed outcome that represents genuine
+uncertainty. The checked operation can: its domain-specific outcomes return
+values instead of stopping execution. Malformed input, capability failures,
+and ABI/provider-contract defects still stop execution.
 
 ## Decision 2: additive, not a breaking change to `file_write_atomic`
 

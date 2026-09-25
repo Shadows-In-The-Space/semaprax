@@ -3,24 +3,23 @@
 Status: local implementation for #178/#180; no hosted or remote-provider claim.
 Audience: compiler contributors and provider adapter integrators.
 
-`provider_adapter_sdk/observation` owns the canonical
-`semaprax.provider-adapter-attempt-observation.v1` transcript (the exported
-`ATTEMPT_OBSERVATION_SCHEMA` is authoritative). A one-start `RecordingAdapter` wraps
-an explicitly injected adapter, borrowed or factory-owned. It records request
+`provider_adapter_sdk/observation` defines the canonical
+`semaprax.provider-adapter-attempt-observation.v1` transcript; exported
+`ATTEMPT_OBSERVATION_SCHEMA` is authoritative. A one-start `RecordingAdapter`
+wraps an explicitly injected borrowed or factory-owned adapter. It records request
 commitment/length, declared capability identity/profile/accounting source,
 ordered Delta commitments and lengths (including empty chunks), Usage snapshots,
 Completed, settlement or failure, start refusal, cancellation commitment/count,
 and optional caller-clock observations. Raw payloads stay outside the rendered
 evidence. Hashes are commitments, not encryption or low-entropy privacy.
 
-Capture has a fixed event ceiling and bounded metadata. Overflow is explicit
-and fails replay. Replay assembly never exceeds 65,536 bytes or the original
-request response ceiling. Replay checks the exact retained request, event
-sequence, cancellation, terminal facts and grammar digest; successful settlement
-requires exactly one Completed and the concatenated deltas as the response.
-A terminal-free capture can describe a cancelled or unresolved attempt. It is
-not evidence of successful remote settlement. Clock values and capability
-claims are host observations, not provider attestations.
+Capture bounds events and metadata; overflow fails replay. Assembly stays
+within 65,536 bytes and the original request's response ceiling. Replay checks
+the retained request, ordered events, cancellation, terminal facts, and grammar
+digest. Success requires exactly one Completed event and a response equal to
+concatenated deltas. A capture without a terminal event may describe cancellation
+or uncertainty, not successful remote settlement. Clocks and capability claims
+are host observations, not provider attestations.
 
 `model_call_receipt/adapter_projection` owns the additive
 `semaprax.model-call-adapter-evidence.v1` document. For a settled generic-kernel

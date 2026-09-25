@@ -184,7 +184,8 @@ fn i64_byte(value: i64, index: usize) -> u8
 @id("catalog_normalizer.app.literal-byte")
 fn literal_byte(kind: usize, index: usize) -> u8
 {
-    match kind { 1usize => { let value = "{\"status\":\"error\",\"category\":\""; text_byte(string_as_str(value), index) }, 2usize => { let value = "\",\"record_index\":"; text_byte(string_as_str(value), index) }, 3usize => { let value = ",\"byte_offset\":"; text_byte(string_as_str(value), index) }, 4usize => { let value = "}\n"; text_byte(string_as_str(value), index) }, 5usize => { let value = "{\"status\":\"ok\",\"count\":"; text_byte(string_as_str(value), index) }, 6usize => { let value = ",\"total_quantity\":"; text_byte(string_as_str(value), index) }, 7usize => { let value = ",\"records\":["; text_byte(string_as_str(value), index) }, 8usize => { let value = "]}\n"; text_byte(string_as_str(value), index) }, 9usize => { let value = "{\"id\":\""; text_byte(string_as_str(value), index) }, 10usize => { let value = "\",\"label\":\""; text_byte(string_as_str(value), index) }, 11usize => { let value = "\",\"quantity\":"; text_byte(string_as_str(value), index) }, 12usize => { let value = ",\"category\":"; text_byte(string_as_str(value), index) }, _ => { let value = "null"; text_byte(string_as_str(value), index) }, }
+    let value = match kind { 1usize => "{\"status\":\"error\",\"category\":\"", 2usize => "\",\"record_index\":", 3usize => ",\"byte_offset\":", 4usize => "}\n", 5usize => "{\"status\":\"ok\",\"count\":", 6usize => ",\"total_quantity\":", 7usize => ",\"records\":[", 8usize => "]}\n", 9usize => "{\"id\":\"", 10usize => "\",\"label\":\"", 11usize => "\",\"quantity\":", 12usize => ",\"category\":", _ => "null", };
+    text_byte(string_as_str(value), index)
 }
 
 @id("catalog_normalizer.app.category-len")
@@ -196,7 +197,8 @@ fn category_len(category: usize) -> usize
 @id("catalog_normalizer.app.category-byte")
 fn category_byte(category: usize, index: usize) -> u8
 {
-    match category { 1usize => { let value = "oversized_input"; text_byte(string_as_str(value), index) }, 2usize => { let value = "invalid_utf8"; text_byte(string_as_str(value), index) }, 3usize => { let value = "malformed_json"; text_byte(string_as_str(value), index) }, 4usize => { let value = "schema"; text_byte(string_as_str(value), index) }, 5usize => { let value = "duplicate_id"; text_byte(string_as_str(value), index) }, 6usize => { let value = "overflow"; text_byte(string_as_str(value), index) }, 7usize => { let value = "provider_denied"; text_byte(string_as_str(value), index) }, 8usize => { let value = "provider_timeout"; text_byte(string_as_str(value), index) }, _ => { let value = "provider_malformed"; text_byte(string_as_str(value), index) }, }
+    let value = match category { 1usize => "oversized_input", 2usize => "invalid_utf8", 3usize => "malformed_json", 4usize => "schema", 5usize => "duplicate_id", 6usize => "overflow", 7usize => "provider_denied", 8usize => "provider_timeout", _ => "provider_malformed", };
+    text_byte(string_as_str(value), index)
 }
 
 @id("catalog_normalizer.app.error-len")
@@ -215,7 +217,7 @@ fn error_byte_at(failure: usize, index: usize) -> u8
     let category_end = 30usize + category_len(category);
     let record_start = category_end + 17usize;
     let offset_start = record_start + record_len + 15usize;
-    if index < 30usize { literal_byte(1usize, index) } else { if index < category_end { category_byte(category, index - 30usize) } else { if index < record_start { literal_byte(2usize, index - category_end) } else { if index < record_start + record_len { if record == 0usize { if index == record_start { 45u8 } else { 49u8 } } else { usize_byte(record - 1usize, index - record_start) } } else { if index < offset_start { literal_byte(3usize, index - record_start - record_len) } else { if index < offset_start + usize_len(failure_offset(failure)) { usize_byte(failure_offset(failure), index - offset_start) } else { literal_byte(4usize, index - offset_start - usize_len(failure_offset(failure))) } } } } } }
+    if index < 30usize { literal_byte(1usize, index) } else { if index < category_end { category_byte(category, index - 30usize) } else { if index < record_start { literal_byte(2usize, index - category_end) } else { if index < record_start + record_len { if record == 0usize { if index == record_start { 45u8 } else { 49u8 } } else { usize_byte(record - 1usize, index - record_start) } } else { if index < offset_start { literal_byte(3usize, index - record_start - record_len) } else { let offset = failure_offset(failure); let offset_len = usize_len(offset); let offset_end = offset_start + offset_len; if index < offset_end { usize_byte(offset, index - offset_start) } else { literal_byte(4usize, index - offset_end) } } } } } }
 }
 
 @id("catalog_normalizer.app.decoded-byte-at")
@@ -286,14 +288,15 @@ fn escape_len(value: u8) -> usize
 @id("catalog_normalizer.app.hex-byte")
 fn hex_byte(value: u8) -> u8
 {
-    match value { 0u8 => 48u8, 1u8 => 49u8, 2u8 => 50u8, 3u8 => 51u8, 4u8 => 52u8, 5u8 => 53u8, 6u8 => 54u8, 7u8 => 55u8, 8u8 => 56u8, 9u8 => 57u8, 10u8 => 97u8, 11u8 => 98u8, 12u8 => 99u8, 13u8 => 100u8, 14u8 => 101u8, 15u8 => 102u8, 16u8 => 48u8, 17u8 => 49u8, 18u8 => 50u8, 19u8 => 51u8, 20u8 => 52u8, 21u8 => 53u8, 22u8 => 54u8, 23u8 => 55u8, 24u8 => 56u8, 25u8 => 57u8, 26u8 => 97u8, 27u8 => 98u8, 28u8 => 99u8, 29u8 => 100u8, 30u8 => 101u8, _ => 102u8, }
+    let digit = if value < 16u8 { value } else { if value < 32u8 { value - 16u8 } else { 15u8 } };
+    if digit < 10u8 { digit + 48u8 } else { digit + 87u8 }
 }
 
 @id("catalog_normalizer.app.escape-byte")
 fn escape_byte(value: u8, part: usize) -> u8
 {
     let named = value == 34u8 || value == 92u8 || value == 8u8 || value == 9u8 || value == 10u8 || value == 12u8 || value == 13u8;
-    if named { if part == 0usize { 92u8 } else { if value == 34u8 { 34u8 } else { if value == 92u8 { 92u8 } else { if value == 8u8 { 98u8 } else { if value == 9u8 { 116u8 } else { if value == 10u8 { 110u8 } else { if value == 12u8 { 102u8 } else { 114u8 } } } } } } } } else { if value < 32u8 { if part == 0usize { 92u8 } else { if part == 1usize { 117u8 } else { if part < 5usize { 48u8 } else { hex_byte(value) } } } } else { value } }
+    if named { if part == 0usize { 92u8 } else { if value == 34u8 { 34u8 } else { if value == 92u8 { 92u8 } else { if value == 8u8 { 98u8 } else { if value == 9u8 { 116u8 } else { if value == 10u8 { 110u8 } else { if value == 12u8 { 102u8 } else { 114u8 } } } } } } } } else { if value < 32u8 { if part == 0usize { 92u8 } else { if part == 1usize { 117u8 } else { if part < 4usize { 48u8 } else { if part == 4usize { if value >= 16u8 { 49u8 } else { 48u8 } } else { hex_byte(value) } } } } } else { value } }
 }
 
 @id("catalog_normalizer.app.escaped-len")
@@ -319,27 +322,8 @@ fn escaped_len(line: borrow Slice<u8>, token: usize, start: usize, end: usize) -
 @id("catalog_normalizer.app.escaped-byte-at")
 fn escaped_byte_at(line: borrow Slice<u8>, token: usize, start: usize, end: usize, wanted: usize) -> u8
 {
-    let mut source = token + 1usize;
-    let mut part = 0usize;
-    let mut emitted = 0usize;
-    let mut offset = 0usize;
-    let mut found = false;
-    let mut value = 0u8;
-    while emitted < end && !found {
-        let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-        let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-        let active = emitted >= start;
-        let width = if active { escape_len(decoded) } else { 0usize };
-        found = active && wanted < offset + width;
-        value = if found { escape_byte(decoded, wanted - offset) } else { value };
-        offset = if active && !found { offset + width } else { offset };
-        let last = part + 1usize >= emit_len(line, source);
-        source = if last { token_end(line, source) } else { source };
-        part = if last { 0usize } else { part + 1usize };
-        emitted = emitted + 1usize;
-        emitted < end && !found
-    }
-    value
+    let length = escaped_len(line, token, start, end);
+    if wanted >= length { 0u8 } else { let mut cursor = escape_cursor_start(line, token, start); let mut index = 0usize; while index < wanted { cursor = escape_cursor_next(line, cursor); index = index + 1usize; index < wanted } escape_cursor_byte(line, cursor) }
 }
 
 // Response writers carry this compact cursor while emitting an escaped token.
@@ -365,28 +349,20 @@ fn escape_cursor_start(line: borrow Slice<u8>, token: usize, skip: usize) -> usi
 @id("catalog_normalizer.app.escape-cursor-byte")
 fn escape_cursor_byte(line: borrow Slice<u8>, cursor: usize) -> u8
 {
-    let source = cursor / 32usize;
-    let part = cursor % 32usize / 8usize;
-    let escaped = cursor % 8usize;
-    let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-    let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-    escape_byte(decoded, escaped)
+    // The mode bit marks the remainder of a canonical six-byte control atom.
+    // Ordinary packed cursors stay below it for the bounded 65,536-byte body.
+    // Only an unnamed control renders six bytes. Output parts two and three
+    // are always ASCII '0', regardless of the accepted source escape.
+    if cursor >= 4194304usize { let source = (cursor - 4194304usize) / 32usize; let offset = (cursor - 4194304usize) % 32usize; match byte_get(line, source + offset) { Option::Some { value } => value, Option::None {} => 0u8, } } else { let source = cursor / 32usize; let part = cursor % 32usize / 8usize; let escaped = cursor % 8usize; if escaped >= 2usize && escaped <= 3usize { 48u8 } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; escape_byte(decoded, escaped) } }
 }
 
 @id("catalog_normalizer.app.escape-cursor-next")
 fn escape_cursor_next(line: borrow Slice<u8>, cursor: usize) -> usize
 {
-    let source = cursor / 32usize;
-    let part = cursor % 32usize / 8usize;
-    let escaped = cursor % 8usize;
-    let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, };
-    let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw };
-    let more_escape = escaped + 1usize < escape_len(decoded);
-    let last = part + 1usize >= emit_len(line, source);
-    let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } };
-    let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } };
-    let next_escape = if more_escape { escaped + 1usize } else { 0usize };
-    next_source * 32usize + next_part * 8usize + next_escape
+    // Validation precedes this writer. Only lowercase canonical \u00hh
+    // unnamed controls may enter raw-copy mode; every other escape retains
+    // the decoded cursor path, including uppercase, named, and surrogate forms.
+    if cursor >= 4194304usize { let source = (cursor - 4194304usize) / 32usize; let offset = (cursor - 4194304usize) % 32usize; if offset < 5usize { cursor + 1usize } else { (source + 6usize) * 32usize } } else { let source = cursor / 32usize; let part = cursor % 32usize / 8usize; let escaped = cursor % 8usize; if escaped >= 2usize && escaped <= 4usize { cursor + 1usize } else { let raw = match byte_get(line, source) { Option::Some { value } => value, Option::None {} => 0u8, }; let decoded = if raw == 92u8 { dec_code_byte(emit_at(line, source, part)) } else { raw }; let canonical_control = if part == 0usize && escaped == 0usize && raw == 92u8 && escape_len(decoded) == 6usize { let low = match byte_get(line, source + 5usize) { Option::Some { value } => value, Option::None {} => 65u8, }; low < 65u8 || low > 70u8 } else { false }; if canonical_control { 4194304usize + source * 32usize + 1usize } else { let more_escape = escaped + 1usize < escape_len(decoded); let last = part + 1usize >= emit_len(line, source); let next_source = if more_escape { source } else { if last { token_end(line, source) } else { source } }; let next_part = if more_escape { part } else { if last { 0usize } else { part + 1usize } }; let next_escape = if more_escape { escaped + 1usize } else { 0usize }; next_source * 32usize + next_part * 8usize + next_escape } } }
 }
 
 @id("catalog_normalizer.app.record-output-len")
@@ -406,13 +382,14 @@ fn record_output_byte(line: borrow Slice<u8>, index: usize) -> u8
 {
     let id = record_id_value(line);
     let label = record_label_value(line);
-    let id_len = escaped_len(line, id, 0usize, decoded_len(line, id));
+    let id_end = decoded_len(line, id);
+    let id_len = escaped_len(line, id, 0usize, id_end);
     let label_start = decoded_trim_start(line, label);
     let label_end_raw = decoded_trim_end(line, label);
     let label_end = if label_end_raw > label_start { label_end_raw } else { label_start };
     let label_len = escaped_len(line, label, label_start, label_end);
     let quantity = quantity_or(line, record_quantity_value(line), -1);
-    if index < 7usize { literal_byte(9usize, index) } else { if index < 7usize + id_len { escaped_byte_at(line, id, 0usize, decoded_len(line, id), index - 7usize) } else { if index < 18usize + id_len { literal_byte(10usize, index - 7usize - id_len) } else { if index < 18usize + id_len + label_len { escaped_byte_at(line, label, label_start, label_end, index - 18usize - id_len) } else { if index < 31usize + id_len + label_len { literal_byte(11usize, index - 18usize - id_len - label_len) } else { if index < 31usize + id_len + label_len + i64_len(quantity) { i64_byte(quantity, index - 31usize - id_len - label_len) } else { 125u8 } } } } } }
+    if index < 7usize { literal_byte(9usize, index) } else { let id_end_index = 7usize + id_len; if index < id_end_index { escaped_byte_at(line, id, 0usize, id_end, index - 7usize) } else { let label_start_index = id_end_index + 11usize; if index < label_start_index { literal_byte(10usize, index - id_end_index) } else { let label_end_index = label_start_index + label_len; if index < label_end_index { escaped_byte_at(line, label, label_start, label_end, index - label_start_index) } else { let quantity_start_index = label_end_index + 13usize; if index < quantity_start_index { literal_byte(11usize, index - label_end_index) } else { let quantity_end_index = quantity_start_index + i64_len(quantity); if index < quantity_end_index { i64_byte(quantity, index - quantity_start_index) } else { 125u8 } } } } } }
 }
 
 @id("catalog_normalizer.app.success-total")

@@ -5,11 +5,10 @@ Audience: maintainers, host integrators, and compiler contributors.
 Status: private, descriptor-only phase-3 evidence. This is not a public or
 stable ecosystem ABI.
 
-The native resource preflight derives one descriptor per admitted function
-from its sealed authority-free host template. That template already came from
-the exact cleanup and value plans accepted for the function. Descriptor
-derivation therefore cannot reclassify HIR, re-plan ownership, or accept
-caller-supplied signature metadata.
+Native resource preflight derives one descriptor per admitted function from
+its sealed, authority-free host template. The template already reflects the
+accepted cleanup and value plans. Derivation cannot reclassify HIR, re-plan
+ownership, or use caller-supplied signature metadata.
 
 ## Canonical wire
 

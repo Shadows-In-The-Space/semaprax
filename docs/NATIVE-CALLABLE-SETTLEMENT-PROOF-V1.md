@@ -9,11 +9,11 @@ loader admission, resource authority, or physical cleanup.
 
 ## Purpose and trust boundary
 
-`SPXNPRF1` lets the compiler serialize its current settlement proof and lets the
-unpublished native host parse the bytes independently. Successful parsing proves
-that the bytes are canonical, internally consistent, bounded, and paired with
-the exact embedded callable-v2 contract. It does not authenticate code origin,
-prove that a finalizer ran, or grant permission to load code or touch a resource.
+`SPXNPRF1` carries a compiler-produced settlement proof that the unpublished
+native host parses independently. Parsing confirms canonical, consistent,
+bounded bytes paired with the embedded callable-v2 contract. It does not
+authenticate code origin, prove finalizer execution, or authorize code loading
+or resource access.
 
 The complete proof is one immutable byte string of at most 65,536 bytes. It
 embeds the exact, unchanged `SPXNABI2` descriptor and the binary graph, so an

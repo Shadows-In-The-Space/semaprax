@@ -1,12 +1,13 @@
 # Agent State Migration v2
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 migration implementation.
-
 Audience: runtime integrators and compiler contributors.
 
-The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only status for pure-call, cumulative-accounting, and joined-runtime
-integration from an actual durable `Suspend`.
+Migration v2 moves an actual durable `Suspend` to a newly bound runtime by
+calling a checked, deterministic State migration function. It carries usage
+forward but grants no host or store authority.
+
+Status: **HOSTED GREEN** under the [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md)
+for the pure call, cumulative accounting, and joined-runtime integration.
 
 `migrate_suspended_agent_runtime_v2` consumes three independently bound
 inputs: the previous `AgentRuntimeV2`, the `AgentRuntimeV2DurableEvidence`

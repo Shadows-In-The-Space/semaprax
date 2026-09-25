@@ -8,11 +8,10 @@ of the migration boundary this document adds around [Live Invocation
 Contract v1](LIVE-INVOCATION-CONTRACT-V1.md) and [Live Invocation
 Persistence v1](LIVE-INVOCATION-PERSISTENCE-V1.md).
 
-This document assumes the reader already knows both of those: the causal
-journal's record format and ordering rules, `kernel::run_live_invocation`'s
-fresh-start/resume/replay/uncertain-intent behavior, and how a journal is
-persisted and recovered across a process boundary. Everything below is
-additive to that contract, not a restatement of it.
+Read the linked invocation and persistence contracts first. They define the
+journal order, `kernel::run_live_invocation`'s fresh-start/resume/replay and
+uncertain-intent behavior, and cross-process recovery. This document adds
+migration; it does not restate those rules.
 
 ## What issue #115 asks for, and why it cannot live inside the kernel
 
@@ -277,7 +276,7 @@ proves the outbound-generation invariant without touching the store or dispatchi
   against fixtures.
 - **"Live" here names this kernel's causal-journal contract, not a running
   compiled conversation.** [Live Invocation Contract
-  v1](LIVE-INVOCATION-CONTRACT-V1.md#non-goals-and-known-limitations-this-round)
+  v1](LIVE-INVOCATION-CONTRACT-V1.md#boundaries-and-known-limitations)
   records that no parser or HIR syntax for `model.invoke` exists yet, and
   `kernel::run_live_invocation` is called for real only from this crate's
   own tests (`src/agent_interaction_schema/live_bridge/tests.rs`) — nothing

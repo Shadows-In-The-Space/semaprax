@@ -7,13 +7,13 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
-This route writes actual canonical `.spx` blobs, trees and a commit into one
-explicitly selected local Git repository, then publishes through one expected-old
-branch-ref update. It does not update a checkout, index, raw Project source path,
-managed Workspace `ACTIVE`, remote, or network service. Git-tree readers can
-observe one complete commit; editors observing the original working tree see no
-change. This is separate authority from candidate preparation, recovery capsules,
-reports, test results, and the managed publication bridge.
+This route writes canonical `.spx` blobs, trees and a commit to one explicitly
+selected local Git repository. It then updates a branch ref only if its old
+value matches the expected value. Git-tree readers see one complete commit;
+the checkout, index, raw Project source paths, managed Workspace `ACTIVE`,
+remotes and network services are unchanged. This authority is separate from
+candidate preparation, recovery capsules, reports, test results and the managed
+publication bridge.
 
 ## Explicit host interface
 
@@ -38,9 +38,10 @@ ending in one LF. No ambient Git identity, clock, signer or editor participates.
 `apply_candidate_git_publication(candidate, approved_candidate_digest,
 project_manifest, target, metadata, authority)` is the publication API. Its
 `CandidateGitAuthority` interface permits injected trusted hosts; the supplied
-process adapter performs real Git object writes and ref mutation. Implementing
-the interface is a host authority decision, not a claim that arbitrary providers
-are trustworthy. The manifest is the exact absolute authenticated Project path.
+process adapter performs real Git object writes and ref mutation. The host must
+decide which implementation to trust; implementing the interface does not make
+an arbitrary provider trustworthy. The manifest is the exact absolute
+authenticated Project path.
 A complete candidate and independently supplied exact approval digest are
 required. Drafts and rejected attempts cannot publish.
 

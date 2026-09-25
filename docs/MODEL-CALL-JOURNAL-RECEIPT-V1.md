@@ -3,11 +3,11 @@
 Status: local Rust evidence projection; no provider or invoice attestation.
 Audience: compiler contributors and journal receipt integrators.
 
-`model_call_receipt::journal_projection` derives per-attempt receipts directly
-from the generic live kernel's retained causal journal.
-`model_call_receipt::source_projection` derives the same evidence shape from an
-opaque, authenticated `RecoveredSourceCheckpoint`, including source retries and
-priced/I/O profiles. These are read-only folds, not additional runtime logs.
+`model_call_receipt::journal_projection` derives per-attempt receipts from the
+generic live kernel's retained causal journal. `source_projection` derives the
+same shape from an authenticated, opaque `RecoveredSourceCheckpoint`, including
+source retries and priced/I/O profiles. Both read existing records; neither
+adds a runtime log.
 
 The schema is `semaprax.model-call-journal-receipt.v1`. The enriched
 [Model Call Receipt v1](MODEL-CALL-RECEIPT-V1.md) remains byte-compatible.

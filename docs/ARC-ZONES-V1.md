@@ -9,7 +9,7 @@
 
 ## Summary
 
-This document fixes the bounded target-neutral model that a future
+This document fixes the target-neutral model that a future
 shared-immutable ARC and managed-zone implementation must preserve. The
 repository contains `src/arc_zones.rs`, a deterministic proof-data model of
 retain/release reference counting inside explicit opt-in managed zones: a
@@ -41,7 +41,7 @@ The key rule is:
 
 ## Relationship to existing contracts
 
-This model extends, but does not replace, existing contracts:
+This model reuses existing contracts without replacing them:
 
 - [RFC 0003](RFC-0003-CLEANUP-AND-RESOURCE-ABI.md) defines target-neutral
   semantic cleanup order and sticky failure selection for single-function
@@ -59,12 +59,9 @@ This model extends, but does not replace, existing contracts:
   full memory model; this document proves none of that integration and changes
   no completion row beyond the bounded Partial status recorded in the
   completion matrix.
-- The completion-matrix row "Shared immutable ARC and opt-in managed zones"
-  remains far from complete: retain/release correctness, cycle policy, escape
-  optimization, and concurrency constraints are now fixed as bounded proof data
-  for one admitted model shape, while real allocation, compiler analysis,
-  language syntax, weak references, cross-backend equivalence, and public
-  surface remain open exactly as before.
+- The completion-matrix row remains incomplete. This fixes bounded proof data
+  for one model shape; allocation, analysis, syntax, weak references,
+  backend equivalence, and public surface remain open.
 
 ## Normative goals
 

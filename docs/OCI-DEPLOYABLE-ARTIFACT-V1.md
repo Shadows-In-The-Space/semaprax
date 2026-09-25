@@ -1,26 +1,24 @@
 # OCI Deployable Artifact v1
 
+Audience: people and coding agents packaging a SEMAPRAX project for a
+container registry or an OCI-artifact-aware deployment pipeline, and compiler
+contributors.
+
 Status: implemented for exactly the Project v1 scalar and Project v3 Useful
 Data v1 / Project v16 Useful Data v2 profiles; not wired to any other Project
 profile, not signed, and not published anywhere. Local evidence only -- see [Evidence and
 nonclaims](#evidence-and-nonclaims).
 
-Audience: people and coding agents packaging a SEMAPRAX project for a
-container registry or an OCI-artifact-aware deployment pipeline, and compiler
-contributors.
-
-GitHub issue [#194](https://github.com/wavect/semaprax/issues/194) asks for a
-deployable-artifact route out of a checked SEMAPRAX project. Before this
-capsule, no OCI, container, or image-manifest generation existed anywhere in
-this repository.
+Issue [#194](https://github.com/wavect/semaprax/issues/194) asks for a
+deployable artifact from a checked project. This capsule supplies the first
+OCI layout, container, or image-manifest generation in the repository.
 
 ## What this is, and is not
 
-`semaprax build --target oci` emits a directory that is a structurally valid
+`semaprax build --target oci` emits a structurally valid
 [OCI Image Layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md):
-an `oci-layout` marker, an `index.json`, and content-addressed blobs under
-`blobs/sha256/`. Real OCI tooling (`oras`, `skopeo`, `crane`, `podman`) can
-inspect it as a layout.
+`oci-layout`, `index.json`, and content-addressed `blobs/sha256/` entries.
+OCI tools such as `oras`, `skopeo`, `crane`, and `podman` can inspect it.
 
 It is an **OCI artifact** (per the [OCI 1.1 `artifactType` extension
 guidance](https://github.com/opencontainers/image-spec/blob/main/manifest.md#guidelines-for-artifact-usage)),

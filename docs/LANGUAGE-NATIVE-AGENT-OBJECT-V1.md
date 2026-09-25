@@ -10,13 +10,12 @@ are implemented in additive specifications, not implicitly added to frozen v1 wi
 
 ## Purpose
 
-The mature goal is for a Semaprax agent to be a compiled language object whose
-semantic graph defines state, context construction, available actions, model
-requirements, capabilities, budgets, transitions, validation, and evidence
-obligations. A model implements a typed stochastic operation inside that
-object. A small generic runtime interprets it.
+The long-term goal is a compiled agent object whose semantic graph names state,
+context, actions, model requirements, capabilities, budgets, transitions,
+validation, and evidence. A model performs one typed stochastic operation;
+a small generic runtime interprets the object.
 
-This document freezes only the first additive implementation boundary:
+This document freezes only this first additive boundary:
 
 ```text
 canonical AgentDefinition v1

@@ -11,10 +11,9 @@ maintainers.
 
 ## Purpose and boundary
 
-This contract extends the existing flat Owned Byte Record v1 semantics to one
-bounded tree of monomorphic records. It closes the compiler-internal movement,
-cleanup, and synchronous shared-loan path before any public aggregate ABI is
-widened.
+This contract extends flat Owned Byte Record v1 to a bounded tree of
+monomorphic records. It covers internal moves, cleanup, and synchronous shared
+loans without widening the public aggregate ABI.
 
 An admitted root record is acyclic by value, contains at least one transitive
 owned `Bytes` leaf, and contains only:

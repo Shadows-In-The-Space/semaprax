@@ -8,10 +8,10 @@ separately gated.
 
 Audience: agent builders, embedding hosts and compiler contributors.
 
-Agents can select and replace an existing precondition or postcondition subtree
-through its checked HIR identity, directly or through an ephemeral typed hole.
-Canonical `.spx` remains authoritative. No source text, spans, AST paths,
-unchecked HIR or placeholder expressions are accepted as program meaning.
+Agents can replace part of an existing precondition or postcondition by its
+checked HIR identity, either directly or through a temporary typed hole.
+Canonical `.spx` remains authoritative. Source text, spans, AST paths, unchecked
+HIR and placeholder expressions are not accepted as program meaning.
 
 ## Discovery and intention
 
@@ -40,9 +40,9 @@ parameters are in scope; `result` is available only in postconditions. Body-loca
 bindings are unavailable in either phase. Predicate-local lexical bindings, when
 admitted by the compiler, follow the existing expression scope traversal.
 
-The old `expression_catalog`, `replace_expression`, extraction and body-hole
-routes retain their body-only behavior. Contract selection uses separate APIs;
-it does not turn an old read-only catalogue entry into mutation authority.
+The existing `expression_catalog`, `replace_expression`, extraction and
+body-hole routes still apply only to bodies. Contracts use separate APIs;
+a read-only catalogue entry does not grant mutation authority.
 
 ## Source replay and constraints
 

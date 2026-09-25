@@ -7,11 +7,11 @@ The earlier five-case local witness retains its original execution scope.
 Audience: compiler contributors, coding agents, CLI users, and reviewers of
 diagnostic-repair planning.
 
-Installed Fix Plan v1 exposes two closed read-only forms: an installed catalog
-of plan kinds and one exact current-source plan. Version 1 advertises only the
-existing Bounded Diagnostic Repair v1 response to `SPX-S103`: assigning a
-persistent identity to one eligible automatic function. It does not guess a
-target, select an identity, instantiate a patch, or apply a repair.
+Installed Fix Plan v1 has two read-only forms: a catalogue of installed plan
+kinds and one exact current-source plan. V1 covers only the Bounded Diagnostic
+Repair v1 response to `SPX-S103`: assigning a persistent identity to an eligible
+automatic function. It does not guess a target, choose an identity, create a
+patch, or apply a repair.
 
 ## API and commands
 

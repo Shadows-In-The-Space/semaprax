@@ -4,9 +4,8 @@ Status: implemented bounded source-authenticated report; **HOSTED GREEN** under 
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 Audience: package tooling authors and compiler contributors.
 
-Semantic Package Report v2 is a deterministic, authority-free semantic
-subject for later offline compatibility analysis. It preserves every v1 API
-and byte unchanged; v2 is a separate schema and library surface.
+Semantic Package Report v2 is a deterministic, authority-free input to offline
+compatibility analysis. V1 APIs and bytes remain unchanged.
 
 ## Authenticated subject and replay
 

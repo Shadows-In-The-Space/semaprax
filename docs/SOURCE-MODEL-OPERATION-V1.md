@@ -4,11 +4,10 @@ Status: **IMPLEMENTED BOUNDED DIRECT-RUNTIME ROUTE; LOCAL EXECUTABLE EVIDENCE**.
 
 Audience: Direct Runtime v2, source-Agent, and provider-adapter maintainers.
 
-This contract binds the existing source Agent `propose` role to one explicit,
-provider-neutral streaming adapter in Direct Runtime v2. It is additive to the
-ordinary caller-owned `ProposalSource` route. It creates no source syntax: the
-existing checked Agent declaration already requires the `propose` role to have
-kind `model`.
+This contract binds a source Agent's existing `propose` role to one explicit,
+provider-neutral streaming adapter in Direct Runtime v2. It adds to the ordinary
+caller-owned `ProposalSource` route without new source syntax: checked Agent
+declarations already require `propose` to have kind `model`.
 
 ## Bound operation
 
@@ -28,16 +27,15 @@ domain-separated digest binds:
 The caller gives the resulting binding and its opaque
 `SourceModelInvocationCapability` to
 `StreamingSourceProposalAdapter::new_bound`, together with the existing
-explicit `AdapterInvocationCapability`. The binding capability commits an
-adapter to this checked runtime; it is not network authority. The adapter
-capability remains the separately injected, non-ambient host authority to call
-one adapter.
+explicit `AdapterInvocationCapability`. The binding capability ties the adapter to this checked runtime, but grants
+no network authority. Permission to call one adapter comes from the separately
+injected, non-ambient adapter capability.
 
-Before construction can reach an adapter factory, the bound source checks the
-compiler Proposal schema digest, source revision and binding capability. After
-factory construction but before `ProviderAdapter::start`, it requires exact
-adapter identity/version/profile equality and performs the existing streaming
-capability negotiation. It never derives a provider, model, endpoint,
+Before calling an adapter factory, the bound source checks the compiler
+Proposal schema digest, source revision and binding capability. After factory
+construction, but before `ProviderAdapter::start`, it checks exact adapter
+identity/version/profile equality and runs the existing streaming capability
+negotiation. It never derives a provider, model, endpoint,
 credential, environment value or filesystem path from source/model bytes.
 
 `AgentRuntimeV2::run_live_bound_model` refuses a frozen proposal inventory, a

@@ -6,17 +6,17 @@ cross-package roundtrip across Project backends.
 
 Audience: compiler, project-tooling, and standard-library contributors.
 
-Project v16 selects `useful-data.v2`. It combines the existing checked internal
-owned-data linking profile with the frozen Useful Data v1 public byte-export
-boundary. This permits a library to compose private Reader/Writer functions
-while retaining its existing borrowed-slice/scalar exports and contracts.
+Project v16 selects `useful-data.v2`. A library can use private Reader/Writer
+functions internally while keeping its existing borrowed-slice/scalar exports
+and contracts. Internal linking uses the checked owned-data profile; public
+byte exports still use the frozen Useful Data v1 boundary.
 It does not select Public Owned Data API v1 or relax that profile's
 contract-free closure rule.
 
 ## Manifest
 
-The flat projection has exactly the same ordered fields as Project v3, with
-an authenticated new schema/profile pair:
+The flat manifest uses the same ordered fields as Project v3, but requires a
+new authenticated schema/profile pair:
 
 ```toml
 schema = "semaprax.project.v16"
@@ -31,8 +31,8 @@ tests = ["json_writer.tests"]
 
 The table manifest remains `semaprax.manifest.v1`; its package profile selects
 this flat projection. An empty export list selects private entry/test execution
-without a public artifact. Schema
-v3 with profile v2, or schema v16 with profile v1, is rejected. No command,
+without a public artifact. Schema v3 with profile v2, or schema v16 with
+profile v1, is rejected. No command,
 capability grant, provider, public nominal type, or generic ABI is added.
 
 ## Separate internal and public admission
@@ -43,8 +43,9 @@ checked nominal identities, ownership, contract evaluation, and independent
 cleanup replay. Private dependency records and consuming helpers may therefore
 compose behind the public boundary.
 
-When exports are selected, the Web role retains its actual entry-main closure plus the selected export
-closures, using the existing conservative reachability rules. Unrelated private
+When exports are selected, the Web role keeps the actual entry-main function
+and selected exports with their required functions, using the existing
+conservative reachability rules. Unrelated private
 functions are excluded. The complete Web projection must still pass the frozen
 Useful Data v1 byte-export admission and emission. Consequently an entry-main
 closure that itself exceeds that public emitter's profile is rejected; this

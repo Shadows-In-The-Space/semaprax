@@ -10,24 +10,19 @@ Issue #211 asks for a reproducible cross-language Agent benchmark laboratory
 comparing SEMAPRAX against Zero, NTNT, Aver, Vera, Hale, MoonBit, Rust, and
 TypeScript, with frozen tasks, recorded provenance, hidden tests, and
 regression scoring — driven by measured outcomes rather than intuition, and
-explicitly not one synthetic leaderboard score. This page is the short
-pointer; the suite itself lives in
+explicitly not one synthetic leaderboard score. This page is a short pointer;
+the suite lives in
 [`benchmarks/cross-language-v1/`](../benchmarks/cross-language-v1/) and its
 full contract in
 [`benchmarks/cross-language-v1/docs/METHODOLOGY.md`](../benchmarks/cross-language-v1/docs/METHODOLOGY.md).
 
 ## What is built
 
-- **A task equivalence contract.** Every task specifies its input space,
-  output shape, the measured region's boundary, and what each language's
-  official toolchain invocation and success signal actually are — so a
-  cross-language comparison can be checked by a reader, not taken on faith.
-  See `tasks/sequence-digest-v1/EQUIVALENCE.md` in the suite for a worked
-  example, including a documented case where SEMAPRAX's `run` command and
-  Rust's/TypeScript's test runners signal pass/fail through genuinely
-  different conventions (stdout value vs. process exit code), and the
-  harness's adapter model reads each one honestly instead of forcing a
-  shared convention onto all three.
+- **A task equivalence contract.** Each task fixes input, output, measured
+  boundary, official invocation, and success signal so comparisons are
+  inspectable rather than asserted. The sequence-digest example shows why the
+  adapter preserves SEMAPRAX stdout and Rust/TypeScript exit-code conventions
+  instead of inventing one shared signal.
 - **Provenance binding.** Every scored task/language pair records a
   `sha256:` digest over its public and hidden source trees, the toolchain
   version actually observed on the run host, and the exact repository
@@ -70,12 +65,10 @@ full contract in
 
 ## What is explicitly not done here, and why
 
-**No timing was measured, and none is committed.** This laboratory was built
-on a host running many concurrent build/test lanes at once; any wall-clock
-number captured under that contention would be false evidence, not
-indicative evidence. The result schema (`benchmark.cross_language.v1`) has
-no field to receive one by accident. Issues #85, #130, and #131 own adding a
-timing metric once an exclusive quiet host is available — see
+**No timing was measured or committed.** This laboratory was built on a host
+with concurrent build/test lanes, so a wall-clock value would be false evidence.
+`benchmark.cross_language.v1` has no timing field. Issues #85, #130, and #131
+own a metric once an exclusive quiet host exists — see
 `docs/METHODOLOGY.md`'s "What a future quiet-host run must do" section in
 the suite for the exact steps.
 

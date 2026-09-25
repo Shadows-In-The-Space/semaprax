@@ -7,8 +7,8 @@ macOS in [run 31338834586, job 93309086230](https://github.com/wavect/semaprax/a
 and Windows in [run 31343897595, job 93322134480](https://github.com/wavect/semaprax/actions/runs/31343897595/job/93322134480).
 
 This milestone packages one exact graph-derived callable-v3 owned-identity
-provider with the unpublished SEMAPRAX native host. It is deliberately behind
-`unstable-desktop-app-harness` and creates no public compiler, admission, or
+provider with the unpublished native host. It requires
+`unstable-desktop-app-harness`; it adds no public compiler, admission or
 ownership surface.
 
 ## Artifacts
@@ -29,12 +29,11 @@ Success prints one exact platform-tagged line.
 
 ## Evidence contract
 
-The platform scripts pin and assert Rust 1.97.1, platform Clang and linker
-identities, and the selected platform SDK/build/import-library identity. They
-run Cargo offline and build the provider, descriptor, and application twice in
-independent target directories. Every packaged executable byte must reproduce
-within that exact asserted toolchain. This is not a cross-toolchain or
-cross-SDK reproducibility claim.
+The scripts pin and check Rust 1.97.1, platform Clang/linker identities and the
+selected SDK/build/import-library identity. They run Cargo offline and build
+the provider, descriptor and application twice in independent target
+directories. Packaged executable bytes must match under that exact toolchain;
+this does not claim reproducibility across toolchains or SDKs.
 The macOS dylib carries the stable package-relative
 `@rpath/SemapraxPrivateProvider.dylib` install identity rather than a build
 path. Its emitted build-version command is checked against the pinned Apple ld,

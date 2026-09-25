@@ -6,12 +6,11 @@ Status: bounded implementation; **HOSTED GREEN** for v0.4.0.
 See the [release baseline](RELEASE-0.4.0-STATUS.md) for evidence scope.
 This is not a latency, throughput, total-memory or scheduling benchmark.
 
-`VNextSession::handle_read_batch(frames, workers)` is an explicit host API for
-concurrent immutable image and discovery reads. The additive
-[retained-read contract](IMAGE-PARALLEL-CANDIDATE-READS-V1.md) extends its explicit
-allowlist to selected candidate, draft and diagnostic reads without changing
-the scheduling and authentication rules below. It takes a slice of raw NDJSON
-frame bodies, without LF, and returns one optional response per input position.
+`VNextSession::handle_read_batch(frames, workers)` lets the host run immutable
+image and discovery reads concurrently. The [retained-read contract](IMAGE-PARALLEL-CANDIDATE-READS-V1.md)
+adds selected candidate, draft, and diagnostic reads to its allowlist without
+changing scheduling or authentication. The API takes raw NDJSON frame bodies
+without LF and returns one optional response per input position.
 The host supplies between one and four workers and one to sixteen frames.
 Each frame retains the existing 64 KiB limit; each response retains the 1 MiB
 limit. Input and retained response payload totals therefore cannot exceed

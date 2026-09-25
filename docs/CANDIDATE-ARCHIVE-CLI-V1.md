@@ -9,13 +9,12 @@ semaprax project-candidate-persist <manifest> <capsule.json> <store-root>
 semaprax project-candidate-load <store-root> <archive-digest> <candidate-digest>
 ```
 
-Persistence reads one bounded regular recovery-capsule file through the existing
-CLI reader and independently replays it against the manifest's live authenticated
-original source revision. It prepares a self-contained source-backed archive and
-finishes live-source authentication before invoking the explicitly selected
-archive store. The store then independently replays the archive before its first
-filesystem effect. This stores a historical source-and-intention subject; it
-does not keep the raw checkout locked or claim it stays at that revision.
+Persistence reads one bounded regular recovery capsule and replays it against
+the manifest's authenticated live original-source revision. It creates a
+self-contained source-backed archive, reauthenticates live source, then calls
+the selected store. The store independently replays the archive before any
+filesystem effect. The result preserves a historical source-and-intention
+subject; it does not lock the checkout or claim that source stays current.
 
 The host must create the store root first and satisfy the private-root and
 same-principal exclusion requirements of [Archive Store v1](CANDIDATE-ARCHIVE-STORE-V1.md).

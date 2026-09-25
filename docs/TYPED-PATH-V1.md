@@ -7,10 +7,9 @@ The Everyday profile remains incomplete.
 Audience: standard-library authors, compiler contributors, and agents working
 with lexical paths.
 
-This profile adds the `std.path.value` library over an ordinary source-authored
-`Path` record. A Path contains a `Bytes` backing value and a `usize` logical
-length. Its backing storage and fields use ordinary source ownership and
-constructors; the record is neither opaque nor unforgeable.
+`std.path.value` defines an ordinary source-authored `Path` record with a
+`Bytes` backing value and `usize` logical length. It uses normal ownership,
+fields, and constructors; the record is neither opaque nor unforgeable.
 
 ## Lexical path contract
 

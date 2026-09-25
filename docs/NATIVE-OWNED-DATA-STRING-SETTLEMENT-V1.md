@@ -10,19 +10,19 @@ Audience: compiler contributors and standalone native SDK reviewers.
 
 ## Defect and affected route
 
-The standalone owned-data SDK derives and independently replays its public
-descriptor before generating the native provider. That descriptor excludes
-public owned String parameters/results, effects, imports, and contracts; it
-does not exclude internal String locals or internal String-valued calls.
+Before generating a native provider, the standalone owned-data SDK derives
+and independently replays its public descriptor. That descriptor excludes
+public owned String parameters/results, effects, imports, and contracts, but
+allows internal String locals and String-valued calls.
 `with_native_owned_data_sdk_subject` does not activate Project v8 or run its
 Wasm admission. The public standalone builder calls the real
 `emit_native_owned_data_provider` with that retained HIR and descriptor.
 
-Previously, `OwnedDataProvider` selected terminator-based String helpers and
-omitted the inline owner ledger. A String local followed by checked arithmetic
-failure could bypass its lexical drop. Context close observes provider handles,
-not these internal allocations, so successful close did not prove settlement.
-Terminator-based clone and query helpers also lost content after U+0000.
+Previously, `OwnedDataProvider` used terminator-based String helpers without
+the inline owner ledger. Checked arithmetic failure after a String local could
+skip its lexical drop. Context close tracks provider handles, not internal
+allocations, so close success did not prove settlement. Clone and query also
+lost content after U+0000.
 
 This is not evidence that the example passes activated Project v8/v9 admission:
 those routes also apply their existing Wasm restrictions. Neither admission is

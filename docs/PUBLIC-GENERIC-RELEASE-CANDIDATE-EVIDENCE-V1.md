@@ -15,22 +15,14 @@ conclusions rather than only aggregate run conclusions. This is real hosted
 evidence, not a frozen #164 candidate: see the corrected §2.16 and §3 below.
 Section 3 lists every #164 requirement that remains open.
 
-**Second revision, 2026-09-19 (same-day follow-up, documentation-only
-pass):** a third hosted run has since been found, at a **different, earlier**
-prior head: [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
-(workflow `CI`), at commit `3548dc9af5d5c576c884a83a82024891d950e4fe` — itself
-an ancestor of `7def8fb1a727787f989428d77eea603ffd0513cf` above, and **not**
-the current head of `main`. Its "Public generic ownership milestone" job
-concluded `success` on all three of ubuntu-latest, macos-latest, and
-windows-latest, while the run's own **aggregate** conclusion is `cancelled`
-(an unrelated superseded job) — a different failure mode than run
-35433295593's aggregate `failure`, and one that is even easier to misread as
-"nothing ran," which is why this run had been missed until now. This run is
-the first hosted execution anywhere in this repository's history of the
-`--lib public_generic_abi` selector (307 passed) — the exact library-module
-selector issue #140's own audit found missing from every workflow file before
-commit `3548dc9a` added it. See the corrected §2.16 and the new §3 item 4 for
-the full citation, including every test count.
+In plain terms: the recorded runs are useful history, but they do not freeze a release candidate.
+
+**Second revision, 2026-09-19:** [run 35407101886](https://github.com/wavect/semaprax/actions/runs/35407101886)
+ran at earlier ancestor `3548dc9af5d5c576c884a83a82024891d950e4fe`, not current
+`main`. Its milestone job succeeded on all three hosts although the aggregate
+run was cancelled by an unrelated superseded job. It was the first hosted
+`--lib public_generic_abi` selector run (307 passed); see corrected §2.16 and
+§3 item 4 for the complete citation and counts.
 
 ## What this document is, and is not
 

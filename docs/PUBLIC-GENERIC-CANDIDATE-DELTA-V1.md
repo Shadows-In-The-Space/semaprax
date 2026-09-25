@@ -1,5 +1,7 @@
 # Public Generic Candidate Delta v1
 
+In plain terms: this compares one candidate against its exact reviewed baseline.
+
 Status: implemented bounded candidate route, hosted green on Linux, macOS, and
 Windows; gate PG-4 of the
 [Public Generic Ownership milestone](PUBLIC-GENERIC-OWNERSHIP-MILESTONE-V1.md).
@@ -12,12 +14,11 @@ immutable Project candidates.
 
 ## Scope
 
-`ProjectCandidate::public_generic_delta(expected_candidate)` emits a
-deterministic, candidate-bound comparison of the public generic *surfaces* of
-the exact immutable base and final candidate revisions. It is the direct
-analogue of [Candidate ABI Delta v1](PROJECT-CANDIDATE-ABI-DELTA-V1.md) for the
-versioned public generic artifacts rather than for the compiler's internal
-identity keys.
+`ProjectCandidate::public_generic_delta(expected_candidate)` compares the
+public-generic surfaces of the exact immutable base and candidate revisions.
+It is deterministic and candidate-bound, like
+[Candidate ABI Delta v1](PROJECT-CANDIDATE-ABI-DELTA-V1.md), but describes
+versioned public-generic artifacts rather than internal identity keys.
 
 | Layer | Identifier |
 | --- | --- |
@@ -28,9 +29,8 @@ identity keys.
 | Facts digest domain | `semaprax.candidate-public-generic-delta.facts.v1\0` |
 | Report digest domain | `semaprax.candidate-public-generic-delta.report.v1\0` |
 
-Both digest domains are new. The candidate-ABI-delta domains are not reused: a
-different projection of the same revisions must not produce a digest another
-route could be asked to accept.
+These digest domains are distinct from candidate-ABI-delta domains, so one
+projection cannot be mistaken for another even when both describe the same revisions.
 
 The route is read-only. It requires the exact candidate digest before doing any
 work, invokes no compiler, executes no target code, creates no file, reads

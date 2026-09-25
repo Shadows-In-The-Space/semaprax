@@ -6,13 +6,12 @@ not started, gated on real-world adoption this repository cannot manufacture.
 Audience: maintainers deciding when to pursue native `Semaprax` recognition on
 GitHub, and coding agents asked to advance issue #227.
 
-This page is the plan for GitHub-side syntax highlighting of `.spx` source. It
-introduces no new grammar: [editors/vscode/syntaxes/semaprax.tmLanguage.json](../editors/vscode/syntaxes/semaprax.tmLanguage.json)
-is the one TextMate grammar this repository owns, already kept in sync with
-the parser by `tests/documentation.rs`'s `editor_grammar::grammar_names_every_parser_keyword`
-(every parser keyword must appear in the grammar, or that test fails). Any
-GitHub-facing submission reuses this file; it does not fork a second grammar
-source of truth.
+This page plans GitHub syntax highlighting for `.spx` files. Submissions must
+reuse [editors/vscode/syntaxes/semaprax.tmLanguage.json](../editors/vscode/syntaxes/semaprax.tmLanguage.json),
+the repository's only TextMate grammar. The
+`editor_grammar::grammar_names_every_parser_keyword` test in
+`tests/documentation.rs` requires every parser keyword to appear in that grammar.
+This plan adds no grammar and creates no second source of truth.
 
 ## What is shipped today
 
@@ -32,7 +31,7 @@ is close enough to Rust's surface syntax (`fn`, braces, `->`, block
 expressions) that Rust highlighting is a reasonable approximation, but
 Semaprax-specific constructs (`permit`, `uses`, `requires`, `ensures`, `@id`)
 render as plain identifiers or keywords rather than with dedicated scopes.
-This is a deliberate, temporary stand-in, not the destination.
+This fallback is temporary; dedicated Semaprax highlighting remains the goal.
 
 ## The destination: native `Semaprax` recognition
 

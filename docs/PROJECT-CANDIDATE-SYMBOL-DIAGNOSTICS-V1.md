@@ -5,11 +5,11 @@ Status: implemented bounded diagnostic association and transport integration; **
 
 Audience: semantic agent authors, embedding hosts, and compiler maintainers.
 
-The additive v5 query `candidate/symbol-diagnostics` associates an existing
-admitted candidate symbol with rejected intentions retained in the current
-session. It does not insert diagnostics into a checked image, manufacture an
-invalid candidate, or change existing image facets/handles, v4 methods, attempt
-report bytes, repair semantics, or source authority.
+The v5 query `candidate/symbol-diagnostics` links an admitted candidate symbol
+to rejected intentions retained in the current session. It does not add
+diagnostics to a checked image or create an invalid candidate. Existing image
+facets/handles, v4 methods, attempt report bytes, repair semantics and source
+authority stay unchanged.
 
 ## Selection and provenance
 
@@ -25,8 +25,8 @@ The canonical aggregate report has schema
 and Project revision separately from the selected candidate and its Project
 revision. Target provenance identifies the stable ID, kind, identity origin,
 owner, source path/module, source revision, and source digest from the admitted
-candidate's semantic index. Historical candidate provenance never becomes a
-claim that its source is the current filesystem revision.
+candidate's semantic index. Historical candidate provenance does not imply that the source still matches
+the current filesystem revision.
 
 Each matching entry, produced by the additive library method
 `ProjectCandidateAttempt::symbol_diagnostics(expected_attempt,

@@ -1,96 +1,43 @@
 # Changelog summary
 
-Status: concise release notes for quick orientation.
+Status: public release summary; v0.6.0 is not published.
+Audience: users and contributors who need the recent changes.
 
-Audience: users and contributors wanting the latest changes without scanning the full historical changelog.
+This is a quick orientation, not a feature-support claim. For exact changes, read
+the [full changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md).
+For implementation status and required evidence, use the
+[completion matrix](COMPLETION-MATRIX.md).
 
-For complete chronological detail, including historical context and archived artifacts, use:
-- [CHANGELOG.md](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md)
-- [docs/CHANGELOG-ARCHIVE.md](CHANGELOG-ARCHIVE.md).
+## v0.6.0 work in progress
 
-## 0.5.0 highlights
+`v0.6.0` is the current prerelease tag, but it is not published.
 
-- Durable source-model quote accounting (V6) now carries observed and unknown
-  provider charges, absolute deadlines, cumulative migration, and optional
-  request/response byte ceilings; the additive priced I/O envelope, store-backed
-  typed execution with acknowledged intents, and deployment-bound live
-  operations are exercised through `source-live` and `source-agent` gates.
-- Owned `String` variant payloads, bounded `Vec`/`Box`/`Buffer` composition,
-  consuming `for own` traversal, function values and closures, and durable
-  Agent migration/iterative runtimes remain bound to exact immutable semantic
-  roots while adding Argon2id sessions, bounded HTTPS POST, and the recent
-  reliability repairs (Seatbelt confinement, TLS loopback, Windows absolute
-  paths, and `rustls` advisories).
-- The `0.4.1` generic-ownership milestone, `0.4.0` hosted-green baseline, and
-  prior `0.3.5`/`0.2.0` archives are retained as published history; `0.5.0`
-  is the new prerelease tag for installation and distribution docs.
+- Local package-registry work now covers signed metadata, lock-bound artifact
+  reads, held generations, and a resolver-cache bridge. It is not a hosted
+  package service.
+- Private native owned-byte and Core Wasm work gained bounded fixtures and
+  observed JavaScript-arena settlement evidence. Public parity and complete
+  cleanup/fuel evidence remain open.
+- The release verifier checks Wavect GmbH's approved GitHub repository and
+  owner identities in the signing certificate. The v0.6.0 tag's hosted gate
+  has not passed, so there are no v0.6.0 release archives or signed-release
+  evidence. See [release status](RELEASE-0.6.0-STATUS.md).
 
-## 0.4.1 highlights
+## Latest available prerelease: v0.5.0
 
-- Public generic ownership is now a separate milestone rather than a side
-  effect of the internal generic closure. It owns eight prerequisite gates, a
-  distinct PG-9 decision gate, the separation invariants between them, and a standing decision that the surface
-  is unsupported and unpublished — plus an executable separation gate that
-  reddens if an internal admission ever starts producing a public generic
-  signature.
-- Four of those gates landed with local evidence: a versioned target-neutral
-  type grammar with length-framed injective identities, explicit template and
-  ordered argument identities that a display rename cannot move, semantic
-  compatibility rules stricter than source compatibility wherever a foreign
-  consumer sees more than a caller, and a candidate-bound delta over immutable
-  Project candidates with byte-exact independent replay.
-- Four generated metadata consumers — Rust, TypeScript/Wasm, C11 and C++ — are
-  compiled warning-free and executed against nine hostile documents, and all
-  of them must refuse each one with the same closed reason. The milestone
-  corpus also runs on Linux, macOS and Windows as a declared release blocker.
-- The bundled standard library gained effect-free policy and cursor packages
-  across `std.fs`, `std.env.policy`, `std.process`, `std.agent`, `std.bytes`,
-  `std.format`, `std.log`, `std.test`, `std.data.csv`, `std.data.toml`,
-  `std.data.json.dec`, `std.encoding.base64`, `std.num.overflow`,
-  `std.path.normalize` and `std.io.lines`, none of which claims a capability it
-  does not exercise.
-- Private owned iterator payloads, generic iterator operations, consuming
-  `for own` traversal, function values and closures deepened, and durable Agent
-  migration and iterative runtimes stayed bound to exact immutable semantic
-  roots.
+v0.5.0 added source-Agent accounting and bounded live-operation envelopes,
+broader owned-data and closure support, and reliability repairs across the
+supported host paths. It remains the latest downloadable prerelease. Its
+[release page](https://github.com/wavect/semaprax/releases/tag/v0.5.0) lists
+the available archives.
 
-## 0.4.0 highlights
+## Earlier milestones
 
-- Generic owned records and variants now cover bounded nested relay, internal
-  ScalarV1 composition, two-sided owned results, and loop-carried owned byte
-  buffers and vectors across interpreter, native C11, and Core Wasm evidence;
-  Copy-scalar vectors also gain bounded immutable `for` traversal lowered to
-  the existing length/get/while HIR, while compiler-owned bounded `Box<T>` and
-  the alloc-tier `std.mem` package add synchronous scalar ownership transfer.
-- ProgramRoot v3, Exact Program Context v2, contracts/test facts, universal
-  semantic query and transaction operations, persistent service transports,
-  and installed diagnostics/fix guidance deepen the agent-facing semantic
-  workflow while retaining revision binding and explicit authority.
-- The language-native agent path now includes source Agent compilation,
-  interaction contracts, lifecycle execution, durable checkpoints, and a
-  bounded Proposal-to-Runtime v1 compatibility adapter.
-- Project v12/v13 add replayable network and HTTPS command profiles, including
-  fixture-only npm/Core-Wasm execution, native C11 HTTPS, explicit capability
-  admission, and hosted browser evidence without ambient network authority.
-- The bundled standard library adds the bounded JSON package family through
-  structural documents and escape decoding, alongside expanded collections,
-  encoding, URL, path, time, random, CSV, TOML, text, and byte utilities.
-- CLI, VS Code, project dependency, scaffold, lock, verification, and guided
-  help surfaces gained broader exact workflows and more actionable stable
-  diagnostics.
-- CI and release infrastructure now fails closed at the Release gate, preserves
-  Windows diagnostics for the large Project shard, exercises cross-platform
-  generated C consumers safely, and carries the offline doctor tool closure
-  through its provisioned release paths.
+- v0.4.1 introduced separate public-generic prerequisites and gates. The
+  public generic surface remains unsupported and unpublished.
+- v0.4.0 is the last accepted
+  [hosted-green baseline](RELEASE-0.4.0-STATUS.md). It expanded internal owned
+  data, agent workflows, Project profiles, and standard-library packages.
+- v0.3.5 and v0.2.0 remain historical prereleases.
 
-## Latest published milestone
-
-- `v0.5.0` is the current prerelease tag used by installation and distribution docs.
-- `v0.4.1` remains the immediately preceding prerelease.
-- `v0.4.0` remains the prerelease before that, and its
-  [release baseline](RELEASE-0.4.0-STATUS.md) remains the accepted hosted-green
-  evidence record.
-- `v0.3.5` remains the prerelease before that.
-- `v0.2.0` remains an archived historical tagged release milestone referenced by legacy completion and release-history records.
-
-This file is intentionally compact: it highlights what changed most recently, not a complete project ledger.
+The [changelog archive](CHANGELOG-ARCHIVE.md) preserves older detailed notes.

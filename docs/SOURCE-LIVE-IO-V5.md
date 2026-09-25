@@ -3,9 +3,9 @@
 Status: additive I/O profile for durable source journal; local evidence, no provider billing claim.
 Audience: source-live integrators and private CLI operators.
 
-Source Live I/O v5 is an additive profile on the durable source journal. It
-adds cumulative provider request and response reservations to an existing v2,
-v3, or priced v4 execution binding. It does not change the canonical binding,
+Source Live I/O v5 adds cumulative provider request and response reservations
+to the durable source journal for an existing v2, v3, or priced v4 execution
+binding. It does not change the canonical binding,
 entry, decoder, chain, or receipt bytes of a binding that has no I/O limits.
 The source journal remains the accounting authority; a CLI receipt is an
 authority-free view of a recovered terminal checkpoint.
@@ -29,17 +29,16 @@ The journal calculates `SourceIoTotals` with exactly these fields:
 | `observed_response_bytes` | Exact raw bytes in acknowledged settled responses. |
 | `unknown_response_reservation_bytes` | Response reservation still attributable to an unobserved provider result. |
 
-Before dispatch, the source prepares its canonical prompt and binds its exact
-length in the attempt identity. V5 reserves that length and the complete bound
-`response_limit` cumulatively when it admits the attempt intent. Admission
-uses checked arithmetic and refuses the attempt without acknowledging its
-intent or calling the provider if either I/O ceiling cannot fit. Earlier
-initialization stages and the selected terminal failure may still have
-acknowledged checkpoints.
+Before dispatch, the source prepares the canonical prompt and records its exact
+length in the attempt identity. When admitting the attempt intent, v5 reserves
+that length and the full `response_limit` against cumulative limits. Checked
+arithmetic rejects attempts that cannot fit either ceiling, without
+acknowledging the intent or calling the provider. Earlier initialization stages
+and the selected terminal failure may still have acknowledged checkpoints.
 
-Reservations never refund. A malformed response, provider failure,
-cancellation after acknowledgement, deadline after acknowledgement, recovery,
-or migration does not reduce either reserved total. A settled response adds
+Reservations are never refunded. Malformed responses, provider failures,
+cancellation or deadline after acknowledgement, recovery, and migration do not
+reduce either reserved total. A settled response adds
 its actual raw byte count to `observed_response_bytes`; it does not credit
 unused response reservation. A failed or uncertain provider result leaves its
 response reservation unknown. In particular, a local transport's

@@ -8,6 +8,10 @@ exact `2634011f3d205077d4533701e412bec8fdcff7c8` full matrix is hosted green in
 1](https://github.com/wavect/semaprax/actions/runs/31423743369/attempts/1); all
 12 jobs passed.
 
+Use Review to inspect one proposed patch and its supporting checked facts
+before deciding whether to apply it. Review never edits source or grants
+approval authority.
+
 ## Command and public surface
 
 The CLI accepts one existing Semantic Patch v1, v2, or the sole canonical v3
@@ -25,17 +29,17 @@ authenticated-Project overload over a Universal Semantic Transaction is owned
 by [Unified CLI v1](UNIFIED-CLI-V1.md); it does not change this report schema or
 the single-file form's bytes.
 
-Patch v1/v2 review embeds one complete, nontruncated Semantic Impact v1 report
-built from the same owned Patch preflight with fixed options `depth = 1024`,
-`max_bytes = 16 MiB`, and `max_nodes = 1024`. Any Impact truncation, omitted or
-deferred node, or nonempty frontier rejects as `SPX-G120`; Review never
-describes an omitted caller closure as unchanged. Impact v1 itself remains
-v1/v2-only.
+For Patch v1/v2, Review embeds one complete Semantic Impact v1 report from the
+same owned Patch preflight. Its options are fixed: `depth = 1024`,
+`max_bytes = 16 MiB`, and `max_nodes = 1024`. Truncation, an omitted or deferred
+node, or a nonempty frontier causes `SPX-G120`. Review cannot describe a caller
+closure as unchanged when part of it was omitted. Impact v1 still accepts only
+Patch v1/v2.
 
-Patch v3 review accepts only the exact canonical three-line
-`assign-function-id` operation admitted by Diagnostic Repair v1. It carries the
-same independently reconstructed identity-rebase evidence as the repair
-preview and does not invoke, embed, or widen Semantic Impact v1.
+For Patch v3, Review accepts only Diagnostic Repair v1's exact canonical
+three-line `assign-function-id` operation. It carries the repair preview's
+independently reconstructed identity-rebase evidence. It neither invokes nor
+embeds Semantic Impact v1, and does not widen that profile.
 
 ## Canonical report
 

@@ -11,18 +11,18 @@ local execution, not a new test run or the current evidence ceiling.
 
 Audience: compiler contributors and reviewers.
 
-This additive internal profile permits a monomorphic caller to omit the entire
-explicit type-argument vector for an already admitted generic function with one
-type parameter. The compiler derives that parameter from argument types, never
-from a requested return type, target layout, or ownership equivalence.
+An internal monomorphic caller may omit the whole type-argument vector when
+calling an admitted generic function with one type parameter. The compiler
+infers it from argument types, not the requested result type, target layout,
+or ownership equivalence.
 
 Every argument must provide evidence through a typed scalar literal, an existing
 local or parameter binding, or an explicitly typed record or variant constructor.
 Calls, projections, operators, blocks, matches, and conditional expressions in
 argument position retain the explicit-vector requirement in this version. Binding
 such a checked expression to a local makes its exact type available. This
-restriction avoids speculative evaluation and does not change ordinary local
-binding inference. Constructor type arguments remain explicit.
+avoids speculative evaluation. Local binding inference is unchanged, and
+constructors still need explicit type arguments.
 
 Unification compares the entire declared parameter type with the corresponding
 argument type. Nominal declarations and ordered argument positions must agree;

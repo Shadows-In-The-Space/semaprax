@@ -8,10 +8,9 @@ maintainers.
 The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
 local-only evidence status without widening the runtime or service contract.
 
-This SEG-04 profile associates runtime execution with one exact immutable
-generation retained by `SemanticWorkspaceService`. It does not change the
-existing workspace snapshot, Project, ProgramRoot, execution, evidence, or
-receipt structures.
+This SEG-04 profile binds runtime execution to one exact immutable generation
+retained by `SemanticWorkspaceService`. Existing workspace snapshot, Project,
+ProgramRoot, execution, evidence, and receipt structures stay unchanged.
 
 ## Exact selection and replay
 
@@ -22,11 +21,10 @@ corresponding compiler-owned ProgramRoot and retains the complete immutable
 generation, including its selected root and semantic image. Caller-supplied
 root bytes are never decoded or adopted.
 
-The binding receipt is a bounded public association of the selected workspace
-revision, ProgramRoot schema and digest, Project revision, semantic-image
-digest, and `authority: false`. It contains no private task or proposal bytes,
-private proposals, or authority. Existing root and receipt bytes remain
-unchanged.
+The bounded public receipt records the selected workspace revision, ProgramRoot
+schema and digest, Project revision, semantic-image digest, and
+`authority: false`. It contains no private tasks, proposals, their bytes, or
+authority. Existing root and receipt bytes stay unchanged.
 
 `WorkspaceExecutionBinding::replay` first reselects the retained state through
 the service, then exact-compares the canonical receipt bytes and digest. Replay
@@ -54,11 +52,11 @@ two focused `workspace_linked_typed_*` tests cover imported roles running
 three turns with joined evidence and an in-memory refresh of an imported
 helper rejecting the stale binding before any host call.
 
-Binding computes a runtime association over the exact deployment, invocation,
-and execution revision before execution. Only a consuming `run` can produce
-the separate evidence association, which joins that bound runtime to its actual
-returned EvidenceRoot. No constructor accepts caller-authored evidence.
-Neither association authorizes execution by itself.
+Before execution, binding records the exact deployment, invocation, and
+execution revision. Only a consuming `run` can create the separate evidence
+association, linking that runtime to the EvidenceRoot actually returned.
+Constructors accept no caller-authored evidence. Neither association alone
+authorizes execution.
 
 The additive schemas are `semaprax.workspace-execution-binding.v1`,
 `semaprax.workspace-runtime-association.v1`, and
@@ -75,14 +73,13 @@ the existing producer-evidence transfer semantics.
 
 ## Refresh and current execution
 
-A binding remains coherent as a historical association after the service
-refreshes to another generation. `require_current` reselects the binding's
-workspace and root against the service and rejects drift with `SPX-G583`.
-Ordinary `run` may execute the retained immutable generation selected by the
-binding. Typed `run_current` borrows the service for the run, checks the
-binding while that borrow is held, and rejects stale state before any retained
-stage or injected operation executes; the service cannot refresh concurrently
-through that call.
+After a service refresh, a binding still identifies its historical generation.
+`require_current` checks the selected workspace and root against the service
+and rejects drift with `SPX-G583`. Ordinary `run` may execute that retained
+historical generation. Typed `run_current` instead borrows the service for the
+run and checks the binding under that borrow. It rejects stale state before
+any retained stage or injected operation runs; the service cannot refresh
+concurrently through the call.
 
 ## Boundaries
 

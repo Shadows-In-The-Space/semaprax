@@ -9,11 +9,10 @@ separately gated.
 Audience: embedding hosts and agents managing bounded v5 candidate-session
 state.
 
-`workspace/retained-subjects` is a compact inventory of handles currently held
-by one live v5 session. It answers which candidates, drafts and
-rejected attempts can still be addressed without probing every possible
-digest. It does not serialize their full reports, revive discarded state or
-make registry membership evidence of semantic validity.
+`workspace/retained-subjects` lists the handles a live v5 session still holds:
+candidates, drafts, and rejected attempts. Clients need not probe possible
+digests. The inventory includes no full reports, cannot restore discarded
+state, and does not prove a retained subject semantically valid.
 
 ## Selection and response
 

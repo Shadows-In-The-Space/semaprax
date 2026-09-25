@@ -11,10 +11,9 @@ compiler contributors.
 
 ## Purpose
 
-The 1.0 command surface converges public workflows on one `semaprax` binary
-and a short list of verbs. These verbs front capabilities the compiler already
-had under protocol-specific names or library APIs. They select and delegate;
-they add no semantic validation or authority of their own.
+The 1.0 CLI gives public workflows one `semaprax` binary and a short verb list.
+Each verb selects an existing compiler capability and delegates to it. The
+verbs add neither semantic validation nor authority.
 
 ## `semaprax review`
 
@@ -357,7 +356,7 @@ room, and the exhaustive catalog remains the grammar authority.
   exact receipt, reports refetches as `present`, feeds `resolve` directly, and
   rejects tampered, foreign, missing, and colliding subjects before any write.
 - Unit tests pin the closed grammars, the route table, and the namespace map.
-- `src/cli/fetch/locked/tests.rs` pins held publication, partial-stage failure,
+- `src/package_cache_host/tests.rs` pins held publication, partial-stage failure,
   retained-stage refusal, root/parent substitution, concurrent destination and
   same-byte replacement, partial publication, cooperative contention, bounded
   input reads and input identity replacement. This additive gate is local

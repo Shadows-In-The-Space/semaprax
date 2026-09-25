@@ -12,7 +12,7 @@ keeps external consumers `not_inspected` because retained Project source cannot
 identify them. [Candidate Package Consumer Replay
 v1](PROJECT-CANDIDATE-PACKAGE-CONSUMER-REPLAY-V1.md) independently authenticates
 one caller-supplied candidate-era provider report, source and complete offline
-package capsule. Candidate Analysis Evidence composes those two reports and
+package capsule. Candidate Analysis Evidence combines those two reports and
 changes only the `external_consumers` area to `partial` for that explicit
 corpus.
 
@@ -85,10 +85,9 @@ required_evidence:
 
 `partial` applies when the selected export has a declared import but zero call
 rows and when the explicit corpus has neither a matching import nor call. Such
-a result says only that this explicit verified corpus has no matching fact. It
-never changes to `known`, never proves absence of other consumers, and does not
-upgrade deployment, generated provenance, artifact, external API or runtime
-evidence.
+a result means only that this verified corpus has no matching fact. It never
+changes to `known` or proves that other consumers are absent. Deployment,
+generated provenance, artifact, external API and runtime evidence stay unchanged.
 
 ## Diagnostics, bounds and authority
 

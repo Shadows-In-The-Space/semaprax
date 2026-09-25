@@ -18,20 +18,20 @@ destination Project must explicitly declare or import the selected migration
 function; the checked linked closure admits only its pure signature
 `OldState -> NewState`. Both nominal State IDs and every persistent flat field
 identity and leaf type are checked against the predecessor and destination
-lifecycles. No submitted HIR or caller-asserted root selects code.
+lifecycles. Submitted HIR and caller-asserted roots cannot select code.
 
 The predecessor must have an actual committed Suspend terminal with a retained
 canonical State carrier. The carrier is decoded under the exact predecessor
 flat State schema, then re-encoded byte-for-byte. Its terminal chain and
 generation, invocation, schema, Project roots, checked migration closure,
 State identities, task, cumulative counters, unit contract, absolute deadline
-and clock floor form the v3 handoff digest. Hashes bind bytes, not the latest
-store generation or exclusive writer authority. The caller must independently
-ensure the predecessor snapshot is latest and cannot be consumed twice across
-destination stores. The destination store must be fresh or supply its own
-latest exclusively owned v3 snapshot. A caller-derived expected handoff may
-further pin the prepared migration; copying it from submitted destination
-checkpoint bytes is not independent evidence.
+and clock floor form the v3 handoff digest. Hashes bind bytes; they do not prove the store generation is latest or grant
+exclusive writer authority. The caller must independently ensure the
+predecessor snapshot is latest and cannot be consumed twice across destination
+stores. The destination must be fresh or supply its own latest, exclusively
+owned v3 snapshot. A caller-derived expected handoff can further pin migration,
+but copying it from submitted destination checkpoint bytes is not independent
+evidence.
 
 The destination model ceiling, iteration limit, logical stage limit,
 per-stage fuel limit and cumulative fuel ceiling may tighten but cannot exceed
@@ -70,9 +70,8 @@ mandatory prefix:
    evidence shape, with cumulative committed counters and bounded carrier.
 
 The writer validates each exact canonical candidate and reserves worst-case
-settlement and terminal room before acknowledging an intent. A failed commit
-poisons that writer; the reported receipt represents only its last ACK and
-cannot establish whether the store accepted an unacknowledged later write.
+settlement and terminal room before acknowledging an intent. A failed commit makes the writer unusable. Its receipt records only the last
+ACK and cannot tell whether the store accepted a later unacknowledged write.
 Recovery must use the latest authoritative store snapshot. A committed
 terminal is returned as an opaque receipt before attempting a continuation
 ledger; it is not reconstructed as a fresh `IterativeRun`.

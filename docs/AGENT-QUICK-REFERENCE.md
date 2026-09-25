@@ -8,65 +8,40 @@ already be canonical; blocks with one must produce exactly that diagnostic code.
 Audience: coding agents and their operators writing SEMAPRAX programs with a
 bounded context window.
 
-This page is the cheapest correct picture of the admitted language. It states
-the shapes that compile today, the diagnostics that unfamiliar habits trigger,
-and how to spend as few tokens as possible per edit-check cycle. It owns no
-rule: [RFC 0001](RFC-0001.md) is the contract and the
-[completion matrix](COMPLETION-MATRIX.md) is the status authority. The
-[language tour](LANGUAGE-TOUR.md) explains the same shapes at length.
+Use this card when writing a `.spx` file. It shows accepted syntax, common
+diagnostics, and the shortest useful check loop. For explanations, read the
+[language tour](LANGUAGE-TOUR.md). [RFC 0001](RFC-0001.md) defines the rules;
+the [completion matrix](COMPLETION-MATRIX.md) says what is implemented.
 
 The installed compiler prints this page verbatim with `semaprax help language`,
 so it is available without the source checkout.
 
 ## Spend tokens on source, not on dumps
 
-- Edit loop: write the file, `semaprax fmt <file>` (rewrites canonically),
-  `semaprax check <file> --json`, `semaprax run <file>`. `check` resolves and
-  validates the same HIR and cleanup plans used by every backend. One diagnostic per
-  line with `code`, `message`, `location`, and `help`; stop on the first
-  error's line and column.
-- `fmt` and `patch` keep `//` comments, each printed on its own line above
-  the item it precedes or right after the item it follows. Workspace-level
-  transactions make no such promise, so intent that must survive every
-  semantic change belongs in `@id` names, contracts, and tests.
-- Read the `.spx` source when it fits. On the committed calculator example,
-  the source is 606 bytes, `semaprax graph` emits 24,419 bytes, and
-  `semaprax context <file> app.main --depth 1` emits 2,279 bytes. `graph` is
-  for tools that need cleanup plans and expression trees, not for orientation.
-- For one declaration's callers, callees, contracts, or ownership across a
-  file, use `semaprax context <file> <stable-id> --depth 1 --filters
-  contracts,ownership --max-bytes 4096` and read `truncation` before trusting
-  the answer. [Agent Context v2](AGENT-CONTEXT-V2.md) owns the schema.
-- In a Project, locate declarations before requesting context: `semaprax query
-  <project-dir> --id <stable-id>` prints the owning path and canonical header;
-  `--calls <stable-id>` prints cross-file callers. Add `--json` only when a tool
-  needs exact Project/graph/source revisions and relationship arrays. The
-  calculator's exact `calculator.add` JSON query is guarded below 1 KiB and 256
-  repository lexical units, instead of transferring its complete Project graph.
-- For the selected declaration's bounded cross-file neighborhood, continue with
-  `semaprax context <project-dir> <stable-id> --direction both --depth 1
-  --max-bytes 2048 --max-nodes 16`; do not request or reconstruct the full graph.
-  The calculator result is guarded at no more than 2 KiB and 600 lexical units,
-  and at less than one sixth of its full authenticated Project graph.
-- `semaprax --help` is a guided overview under 2 KB: the commands above,
-  grouped by task, with one-line purposes. `semaprax help all` is the 7 KB
-  exhaustive catalog; use `semaprax help <command>` for one command's exact
-  grammar.
-- Use `semaprax help language topics` to list the stable language-card topics,
-  then `semaprax help language <topic>` to transfer only the compiler-checked
-  section needed for the current question. Matching is exact; the full
-  `semaprax help language` card remains available when several topics are
-  needed.
-- When a diagnostic code is already known, use `semaprax help diagnostic
-  <SPX-code>` for only its indexed correction; list the exact supported codes
-  with `semaprax help diagnostic codes`.
-- When one canonical declaration example is enough, use `semaprax help shapes
-  <kind|stable-id|path#stable-id>` instead of the full shapes catalog. Kind
-  selectors return the smallest compiler-verified exemplar. The guarded
-  `calculator.add` result is 114 bytes and 33 lexical units instead of 22,888
-  bytes and 7,571 units.
-- Diagnostics carry stable `SPX-…` codes. Bind tests and repair logic to the
-  code, never to the message text.
+1. Write the file, run `semaprax fmt <file>`, then
+   `semaprax check <file> --json`. Run it with `semaprax run <file>` when the
+   check succeeds. Fix the first diagnostic at its reported line and column.
+   Diagnostics contain `code`, `message`, `location`, and `help`; tests should
+   match the stable `SPX-…` code, not message wording.
+2. Read a small `.spx` file directly. Use `semaprax graph <file>` only when a
+   tool needs the whole expression tree or cleanup plan. On the calculator
+   example, the graph is about 40 times larger than source.
+3. For one declaration, ask `semaprax context <file> <stable-id> --depth 1
+   --filters contracts,ownership --max-bytes 4096`. Check `truncation` before
+   relying on the result. [Agent Context v2](AGENT-CONTEXT-V2.md) defines it.
+4. In a Project, first locate a declaration with `semaprax query
+   <project-dir> --id <stable-id>`; use `--calls <stable-id>` for callers. Then
+   request a bounded neighborhood with `semaprax context <project-dir>
+   <stable-id> --direction both --depth 1 --max-bytes 2048 --max-nodes 16`.
+   Use `--json` only when you need exact revision and relationship fields.
+5. Ask for narrow help: `semaprax help <command>`, `semaprax help language
+   topics`, `semaprax help language <topic>`, `semaprax help diagnostic
+   <SPX-code>`, or `semaprax help shapes <kind|stable-id|path#stable-id>`.
+   `semaprax help all` and the full language card are for broad questions.
+
+`fmt` and single-file `patch` preserve `//` comments. Workspace transactions
+do not promise that, so put durable intent in stable `@id` names, contracts,
+and tests.
 
 ## A complete file
 
@@ -81,13 +56,13 @@ fn main() -> i64
 ```
 
 - One `module dotted.name;` per file, first.
-- Every declaration carries `@id("dotted.stable.name")`. Without it the
-  compiler warns `SPX-S103`, and renaming the function changes its identity.
+- Give every declaration an `@id("dotted.stable.name")`. Without it the
+  compiler warns `SPX-S103`; a function rename then changes its identity.
 - The entry point is exactly `fn main() -> i64`. There is no other signature.
-- A function body is a block: zero or more statements (`let`, assignment,
-  `while`, `unsafe`) followed by exactly one tail expression whose value is the
-  block's value. There is no `return`, no expression statement, no `for`, no
-  `else if`, no tuple, and no unit value in user code.
+- A function body has zero or more statements (`let`, assignment, `while`,
+  `unsafe`) and one final expression. That expression supplies the block's
+  value. User code has no `return`, expression statement, `for`, `else if`,
+  tuple, or unit value.
 - Source blocks, delimiters, unary chains, and expression trees may nest at
   most 128 levels; `SPX-P207` asks you to extract a named helper.
 - Canonical layout puts the function body's `{` on its own line and each
@@ -109,8 +84,8 @@ fn main() -> i64
   `Slice<u8>`.
 - `Bytes`, `Slice<u8>`: no literal; owned bytes and borrowed byte view.
 
-Operators never mix types: `n < 5` fails with `SPX-T208` when `n` is `usize`;
-write `n < 5usize`. Strings do not support `+`; use `string_concat`.
+Operators do not mix types. If `n` is `usize`, `n < 5` fails with `SPX-T208`;
+write `n < 5usize`. Use `string_concat`, not `+`, for strings.
 
 ## Control flow, mutation, contracts, effects
 
@@ -159,9 +134,9 @@ fn main() -> i64
 
 - `if` always has `else` and is an expression. Nest `if` inside `else { … }`
   instead of `else if`.
-- A `while` condition must be `bool` and is re-evaluated before each iteration.
-  Its body is an ordinary block, so it needs a tail expression, but that tail's
-  value is discarded and does not control repetition. While bodies admit only
+- A `while` condition must be `bool` and is checked before every iteration.
+  Its body still needs a final expression, but that value is discarded; the
+  condition controls repetition. While bodies admit only
   Copy-scalar operations and scalar-returning calls, plus the exact
   `byte_get`/`Option<u8>` inspection profile; record/variant construction and
   aggregate-returning calls are `SPX-T252`.
@@ -247,7 +222,7 @@ fn main() -> i64
 }
 ```
 
-- Every field and case carries its own `@id`. Cases without payload are
+- Give every field and case its own `@id`. Cases without payload are
   written `Name,` in the declaration and `Type::Name {}` everywhere else.
 - Constructing a generic variant spells the type arguments:
   `Option<i64>::Some { value: v }`. Matching one does not:
@@ -290,11 +265,11 @@ fn main() -> i64
 }
 ```
 
-- `own T` parameters consume the argument; a second use is `SPX-O101`.
-  `borrow T` parameters read it. Resources declare `drop trivial;` or
+- An `own T` parameter consumes its argument, so using it again is `SPX-O101`.
+  A `borrow T` parameter reads it. Resources declare `drop trivial;` or
   `drop import "host.symbol";`.
-- The reference interpreter behind single-file `semaprax run` rejects modules that declare
-  resources with `SPX-B104`. Verify them with `check`, exercise them through a
+- Single-file `semaprax run` rejects modules declaring resources with
+  `SPX-B104`. Verify them with `check`, exercise them through a
   project's native or Wasm build (or the explicit `run <file> --native` lane),
   and keep interpreter-run examples free of `resource` declarations.
 
@@ -338,15 +313,15 @@ fn main() -> i64
   parameters and to `str_as_bytes`.
 - Byte functions take `borrow Slice<u8>`. Get one from `str_as_bytes(view)`,
   `array_as_slice(array_binding)`, or `bytes_as_slice(bytes_binding)`.
-- An owned bounded byte buffer is one write-once expression: `bytes_zeroed`
-  allocates at a `usize` literal capacity and each `bytes_set` link takes the
-  previous link, any `usize` index expression, and the byte. Binding the result
-  freezes it; read it with the ordinary borrowed operations. A named binding
-  cannot be re-opened (`SPX-T271`), a literal index at or above the capacity is
+- Build an owned bounded byte buffer as one write-once expression:
+  `bytes_zeroed` allocates at a `usize` literal capacity, and each `bytes_set`
+  link takes the previous link, any `usize` index expression, and the byte.
+  A binding freezes the result; read it with borrowed operations. You cannot
+  re-open a named binding (`SPX-T271`); a literal index at or above capacity is
   `SPX-T272`, and a computed index outside the buffer fails at run time with
   `semaprax.byte-buffer.v1` code 1 before anything is written.
   [Owned Bounded Byte Buffer v1](OWNED-BOUNDED-BYTE-BUFFER-V1.md) owns the rule.
-- One shape re-opens a frozen buffer: the same-owner replacement
+- One form re-opens a frozen buffer: the same-owner replacement
   `buffer = bytes_set(buffer, index, value)`, where the assignment target and
   the `buffer` operand are the same `let mut` binding. That is also the only
   `bytes_set` a bounded `while` body admits, so a loop fills a buffer the loop
@@ -387,8 +362,8 @@ fn main() -> i64
 
 - `stdout_write(slice)` needs both `permit { process.stdout.write }` and
   `uses { process.stdout.write }` and returns the `usize` byte count.
-- Single-file `run` evaluates `app.main` in the bounded reference interpreter;
-  `--json`, `--max-steps`, and `--max-bytes` are available, while `--native`
+- Single-file `run` evaluates `app.main` in the bounded reference interpreter.
+  `--json`, `--max-steps`, and `--max-bytes` are available; `--native`
   explicitly selects the generated C11 route. The exact
   `process.stdout.write` authority automatically selects the bounded stdout
   transcript interpreter, so the example above prints `banana!0`. `args_len`, `arg_utf8`,
@@ -449,13 +424,12 @@ fn main() -> i64
 | `box_get<T>` | `(value: borrow Box<T>) -> T` synchronous Copy access |
 | `box_into_inner<T>` | `(value: own Box<T>) -> T` consuming extraction |
 
-These names are reserved; declaring your own `string_len` is `SPX-S113`.
+These names are reserved. Declaring your own `string_len` is `SPX-S113`.
 
-Compiler-owned `Box<T>` is a distinct uniquely owned allocation selected only
-by the three Box operations. An authored `record Box<T>` without those
-operations remains an ordinary inline record. The bounded Box profile has no
-owned payload, public generic ABI, region, arena, or shared-ownership surface;
-see [Owned Bounded Box v1](OWNED-BOUNDED-BOX-V1.md).
+The three Box operations select a compiler-owned, uniquely owned allocation.
+An authored `record Box<T>` without them is still an inline record. The bounded
+Box profile has no owned payload, public generic ABI, region, arena, or
+shared-ownership surface; see [Owned Bounded Box v1](OWNED-BOUNDED-BOX-V1.md).
 
 To print a computed integer from one file, render it, borrow the resulting
 string, and write its bytes:
@@ -481,11 +455,10 @@ fn main() -> i64
 
 ## Habits from other languages: diagnostic examples
 
-Each block below is what an agent typically writes first. The marker names
-the diagnostic it produces; the fix is in the text after it. For parser and
-source-verifier rejections the compiler prints the same fix as the diagnostic's
-`help` line, and for the rest the message itself names the accepted form, so
-act on the diagnostic before re-reading this page.
+Each block below shows a common first attempt. Its marker names the expected
+diagnostic; the following text gives the fix. Parser and source-verifier
+diagnostics repeat that fix in `help`; other messages name the accepted form.
+Read the diagnostic first, then return here if needed.
 
 <!-- expect: SPX-P106 -->
 ```semaprax
@@ -648,12 +621,11 @@ Other first-attempt diagnostics and their fixes:
 
 ### Bounded Vec traversal
 
-The borrowed Vec traversal form is
-`for item in values { body }`, where `values` is a simple immutable `Vec<T>`
-binding and `T` is one of the eight Copy scalars. It snapshots the length once,
-visits elements in ascending index order, freezes `values`, and discards the
-body result. Keep the item immutable and do not move, mutate, or reassign the
-vector inside the body. Computed iterable expressions, owned elements,
+Use `for item in values { body }` to borrow-traverse a simple immutable
+`Vec<T>` binding, where `T` is one of the eight Copy scalars. It snapshots the
+length once, visits elements in ascending index order, and freezes `values`.
+The body result is discarded. Keep the item immutable; do not move, mutate, or
+reassign the vector inside the body. Computed iterable expressions, owned elements,
 consuming traversal, and `break`/`continue` remain outside this `for` form. See
 [Owned Bounded Vec For Traversal v1](OWNED-BOUNDED-VEC-FOR-TRAVERSAL-V1.md).
 
@@ -677,9 +649,9 @@ callbacks under [Generic Iterator Helpers v1](GENERIC-ITERATORS-V1.md).
 
 ## Projects
 
-A project is a `semaprax.toml` beside a `src/` directory. Write the
-extensible table layout; the frozen one-line-per-key `semaprax.project.v1`
-layout of the committed examples stays admitted:
+A project puts `semaprax.toml` beside `src/`. Use the extensible table layout
+below. The committed examples' frozen, one-line-per-key
+`semaprax.project.v1` layout also remains admitted:
 
 ```toml
 schema = "semaprax.manifest.v1"
@@ -700,9 +672,9 @@ web = ["calculator.add"]
 std.num = "^0.1.0"
 ```
 
-The bytes must be canonical: tables in that order, one blank line between
-them, arrays on one line, no comments. A non-canonical manifest fails with
-`SPX-J100` and a `help` line naming the first differing line (for the frozen
+Manifest bytes must be canonical: keep the shown table order, one blank line
+between tables, one-line arrays, and no comments. A non-canonical manifest
+fails with `SPX-J100`; its `help` line names the first differing line (for the frozen
 one-line-per-key layout, the six lines in order); an unknown or reserved table
 or key fails with `SPX-J120`. `[package] profile` selects the admitted consumer
 profile. `[dependencies]` links packages from the compiler's closed bundled
@@ -711,7 +683,7 @@ fail with `SPX-J121`, while ordinary non-bundled packages still require the
 separate resolution route. `[targets] matrix = ["wasm32"]` rejects native
 builds with `SPX-J122`.
 
-Modules import by stable identity, not by path:
+Import modules by stable identity, not by path:
 `use function @id("calculator.add") from calculator.core as add;` directly
 after the `module` line of the importing file; `entry` names the one module
 that declares `main`. Project v1 function parameters and results are limited

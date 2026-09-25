@@ -4,13 +4,12 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax region-report <file.spx> [--max-bytes N]` is a deterministic,
-read-only projection that describes one verified module's lifetime structure.
-It is the first executable slice of the completion-matrix row "Regions/arenas"
-under Language and safety, moving that row from Missing to **Partial**. It
-implements no region inference, adds no region annotation syntax, introduces
-no arena type, performs no bulk release, changes no destructor behavior,
-executes nothing, and changes no source.
+`semaprax region-report <file.spx> [--max-bytes N]` describes the lifetime
+structure of one verified module. This deterministic read-only report is the
+first executable slice of the Language-and-safety "Regions/arenas" matrix row,
+moving it from Missing to **Partial**. It adds no region inference or syntax,
+arena type, bulk release, or destructor change. It executes nothing and changes
+no source.
 
 ## Command
 

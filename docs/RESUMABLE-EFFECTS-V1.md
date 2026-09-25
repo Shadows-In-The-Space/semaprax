@@ -7,10 +7,9 @@ delivered versus what remains.
 Status: **a minimal `.spx` slice with compiler-owned lowering, interpreter
 execution, authority-free production target preparation, and private
 cross-backend execution parity evidence**, on top of a Rust reference
-validator. Issue #204 asks the compiler to let an ordinary,
-non-Agent function declare typed resumable effects with the same generality
-Aver's `yield` lowering has. The pieces that exist today are deliberately
-different in kind:
+validator. Issue #204 asks for typed resumable effects in ordinary non-Agent
+functions, with the generality of Aver's `yield` lowering. The current pieces
+have different roles:
 
 - `src/resumable_effects/` — a Rust-level generic driver, journal, capability
   gate, per-effect signature table and checkpoint codec, proving the

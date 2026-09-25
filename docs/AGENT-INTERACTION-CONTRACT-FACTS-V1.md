@@ -1,8 +1,12 @@
 # Agent Interaction Contract Facts v1
 
-Status: source-owned, additive, authority-free compiler fact bundle.
+Audience: compiler, Project, ProgramRoot, query, and service maintainers.
 
-Audience: compiler, Project, ProgramRoot, query, and semantic-service maintainers.
+This bundle lets Project, ProgramRoot, query, and semantic-service consumers
+read the exact Proposal and Observation schemas derived from a checked Agent.
+It is compiler data, not permission to perform an action.
+
+Status: source-owned, additive, authority-free compiler facts.
 
 `semaprax.agent-interaction-contract-facts.v1` binds each compiler-admitted
 source Agent to the exact Proposal Schema v1 and Observation Schema v1 derived

@@ -11,11 +11,10 @@ maintainers.
 
 ## Purpose and closed admission
 
-This contract extends the bounded [Acyclic Nested Owned-Byte Records
-v1](NESTED-OWNED-BYTE-RECORDS-V1.md) profile with exact recursive
-destructuring. It admits one irrefutable record pattern under explicit
-`match own` or `match borrow` only when the scrutinee is an exact named place
-whose resolved type already satisfies that profile.
+This adds exact recursive destructuring to
+[Acyclic Nested Owned-Byte Records v1](NESTED-OWNED-BYTE-RECORDS-V1.md).
+An explicit `match own` or `match borrow` may use one irrefutable record pattern
+only for an exact named place whose resolved type already meets that profile.
 
 The inherited limits remain exact: record depth **64**, transitive owned
 `Bytes` leaves **256**, and fields examined **4,096**. Source verification and

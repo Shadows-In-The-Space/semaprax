@@ -7,12 +7,11 @@ Everyday profile and streaming `std.io` scope remain incomplete.
 Audience: language users, compiler contributors, standard-library authors, and
 backend implementers.
 
-This profile is the bundled `std.io.lines` package: line meaning over the
-`std.io` Reader and Writer cursors. [IO Cursors v1](IO-CURSORS-V1.md) owns
-those shapes and their existing transitions; nothing here changes an existing
-signature, contract, identity, or byte. Line processing composes the same
-records through an ordinary `[dependencies] std.io = "=0.1.0"` import: it
-introduces no new type, no allocation, and no host authority.
+`std.io.lines` gives line meaning to the existing `std.io` Reader and Writer.
+[IO Cursors v1](IO-CURSORS-V1.md) still owns their shapes and transitions;
+signatures, contracts, identities, and bytes do not change. The package uses
+an ordinary `[dependencies] std.io = "=0.1.0"` import and adds no type,
+allocation, or host authority.
 
 Line processing is a sibling package rather than more of `std.io` for the
 reason [Standard Library v1](STANDARD-LIBRARY-V1.md) already records for

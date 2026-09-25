@@ -19,7 +19,7 @@ read as claiming otherwise.
 [Issue #209](https://github.com/wavect/semaprax/issues/209) asks for one
 independently verifiable capsule that unifies SEMAPRAX's source, semantic,
 transaction, assurance, execution, model/tool, artifact, package, decision,
-and publication evidence. This document and `src/audit_capsule.rs` implement
+and publication evidence. This document and `src/audit_capsule.rs` provide
 the **envelope**: a `semaprax.audit-capsule.v1` manifest, a content-addressed
 object set referenced by plain SHA-256 digest, an association graph, a
 redaction mechanism, a signature policy that verifies `ed25519-raw-v1`
@@ -112,10 +112,9 @@ the referenced object's exact bytes -- the same digest an independent
   guarantee than it actually establishes. Profile composition (below)
   remains unimplemented, so there is nothing for a composed-capsule CLI verb
   to do yet.
-- **`diff_capsules` compares two already-parsed capsules, not two capsule
-  files.** [`diff_capsules`] itself never reads a file and never
-  re-verifies either side; `semaprax audit diff` is the thin wrapper that
-  does both independently before calling it.
+- **`diff_capsules` compares parsed capsules, not files.** It never reads or
+  re-verifies either side; `semaprax audit diff` performs those steps before
+  calling it.
 
 ## Schema: `semaprax.audit-capsule.v1`
 

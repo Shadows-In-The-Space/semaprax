@@ -10,10 +10,10 @@ Audience: compiler contributors, generated-package consumers and reviewers.
 
 ## Purpose and selection
 
-This package makes the existing [standalone internal String compiler and
-runtime](WASM-INTERNAL-STRINGS-V1.md) usable from the source build command.
-It introduces no new language semantics, Wasm ABI, public String parameter or
-result, Project profile, npm carrier, or runtime implementation.
+This package exposes the existing [standalone internal String compiler and
+runtime](WASM-INTERNAL-STRINGS-V1.md) through the source build command. It
+adds no language semantics, Wasm ABI, public String parameter or result,
+Project profile, npm carrier, or runtime implementation.
 
 ```sh
 semaprax build app.spx --target web --profile internal-strings-v1 \

@@ -4,7 +4,7 @@ Status: implemented local-fixture execution extension; external-language admissi
 
 Audience: benchmark operators and reviewers of offline adapter provenance.
 
-This reference defines `benchmark.cross_language.runnable_adapter.v1`. It is
+This reference defines `benchmark.cross_language.runnable_adapter.v1`; it is
 an execution extension of the existing unavailable-only
 [Agent Task Comparison v1](AGENT-TASK-COMPARISON-V1.md) baseline admission,
 not a second corpus, identity parser, or equivalence policy. The baseline
@@ -77,13 +77,11 @@ from becoming an external-language result by implication.
 
 ## Exact fixture execution
 
-For an admitted local fixture, the extension takes private bounded snapshots of
-the descriptor, inventories, selected public and hidden trees, the selected
-equivalence/oracle input, scorer `run.py`, and adapter document before launch.
-The result and every CLI input are acquired only through nonblocking,
-no-follow, regular-file reads with explicit caps. The executable result path is
-an exclusive private regular file. Thus replacing a source or inventory after
-admission cannot change the launched scorer input.
+For an admitted fixture, the extension snapshots the descriptor, inventories,
+selected trees, equivalence/oracle input, scorer, and adapter before launch.
+Result and CLI inputs use capped nonblocking no-follow regular-file reads; the
+result path is an exclusive private regular file. Later replacement cannot
+change the launched scorer input.
 
 The snapshot runs exactly one existing `run.py` pair using this argv shape:
 
@@ -99,13 +97,10 @@ The snapshot runs exactly one existing `run.py` pair using this argv shape:
   --output <exclusive-temporary-result.json>
 ```
 
-The POSIX-only profile creates one process group with the snapshot scorer as
-leader. Hardened adapter children join that same group; neither layer creates a
-second session. It enforces one shared monotonic deadline, caps each captured
-output stream at 65,536 bytes, and kills that complete group on deadline or
-output overflow. Non-POSIX hosts, or a scorer that is not its admitted group
-leader, refuse execution rather than silently applying parent-only timeout
-semantics.
+The POSIX profile makes the snapshot scorer one process-group leader; hardened
+children join it without another session. One monotonic deadline and 65,536-byte
+per-stream cap apply to the whole group, which is killed on either overflow.
+Non-POSIX hosts or a non-leader scorer refuse rather than weaken timeout semantics.
 The subprocess receives only deterministic `LANG`, `LC_ALL`, and `TZ`, plus
 the explicitly admitted macOS SDK variables below: it never restores `PATH`,
 `xcrun`, `rustup`, Cargo homes, dynamic-loader startup variables, or network

@@ -10,13 +10,10 @@ Audience: language users, coding agents, and compiler contributors.
 
 ## Purpose
 
-Canonical formatting projected the program back to text from the syntax tree,
-and the syntax tree never held comments, so `semaprax fmt` deleted every `//`
-comment a person wrote. The agent quick reference had to warn that nothing
-after `//` survives. This version keeps comments through formatting. It does
-so by position rather than by changing the syntax tree: the lexer records
-where each comment was, the formatter maps each position onto the item it
-belongs to, and prints it there.
+The syntax tree formerly omitted comments, so `semaprax fmt` deleted every
+`//` comment. This version preserves comments by position without changing the
+tree: the lexer records a position, and the formatter attaches and prints it
+with its item.
 
 ## What is preserved
 

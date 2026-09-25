@@ -8,9 +8,9 @@ broader product completion remain separately gated.
 
 Audience: compiler contributors, semantic tooling authors, and reviewers.
 
-This is a narrow lane of the existing `extract_function` operation. It moves
-one authenticated authored expression into a fresh helper when that expression
-consumes exactly one whole local owning value. The only admitted owner types are
+This restricted `extract_function` route moves one authenticated authored
+expression into a new helper when it consumes exactly one whole local owning
+value. The only admitted owner types are
 `Bytes` and bare `string`. The request and selector remain those of
 [Project Function Extraction v1](PROJECT-EXTRACTION-V1.md); callers cannot name
 captures, parameter modes, types, source spans, cleanup slots, or effects.
@@ -29,10 +29,9 @@ The helper receives the exact owner with owning HIR semantics (`own Bytes`, or
 the language's bare owning `string` parameter form). The caller evaluates the
 new direct helper call at the selected expression's original position and
 transfers the local there. Immutable Copy captures retain their existing
-first-authored-use ordering; evaluating them introduces no effects. The helper
-body is the exact selected subtree, so its internal left-to-right order remains
-unchanged. The caller no longer cleans the transferred owner; the ordinary call
-commit and helper entry cleanup state own that responsibility. An already
+first-authored-use ordering; evaluating them introduces no effects. The helper body is the exact selected subtree, preserving its left-to-right
+order. The caller no longer cleans the transferred owner. Ordinary call commit
+and helper-entry cleanup state take over that responsibility. An already
 supported Copy or resource-free owned result may cross back through the
 existing result publication rules.
 

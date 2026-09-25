@@ -12,14 +12,11 @@ Tracking issue: [#279](https://github.com/wavect/semaprax/issues/279).
 
 ## Scope decision
 
-Linux AArch64 is in scope for the private production provisioner. The owning
-[Provisioner v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md#purpose-and-boundary)
-states that its first implementation is native 64-bit little-endian Linux
-x86-64 **and AArch64**. Its source-level admission also selects a closed,
-default-deny syscall table for each native ABI. That implementation statement
-does not make AArch64 evidence interchangeable with x86-64 evidence: the
-existing x86-64 gate intentionally rejects AArch64, and its run can never
-credit this contract.
+The private [Provisioner v1](DOCTOR-PRODUCTION-PROVISIONER-V1.md#purpose-and-boundary)
+defines the platform boundary. Its first implementation is native 64-bit little-endian Linux
+x86-64 **and AArch64**, with a default-deny syscall table for each native ABI.
+Implementation scope is not execution evidence. The existing x86-64 gate rejects AArch64, so an x86-64
+run cannot satisfy this contract.
 
 Accordingly, this document commits AArch64 to separate tracking. A future
 fully provisioned AArch64 gate must exercise the same twenty-six lifecycle

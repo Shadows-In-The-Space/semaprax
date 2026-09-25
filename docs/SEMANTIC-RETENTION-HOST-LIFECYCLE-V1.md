@@ -11,19 +11,18 @@ metadata coordination at startup.
 
 ## Startup boundary
 
-`RetentionLifecycleCoordinator::open` accepts only:
+At startup, `RetentionLifecycleCoordinator::open` accepts only:
 
 - one caller-selected existing private retention-registry root;
 - one bounded `RetentionPolicy`; and
 - either an exact canonical expected cursor digest or an explicit expectation
   that the registry is uninitialized.
 
-The constructor authenticates that expectation through ordinary registry
-recovery. An initialized registry must match both the expected cursor and fixed
-policy. An uninitialized expectation accepts only the registry's exact
-not-initialized result; a busy, malformed, substituted, or initialized root
-fails. The root and expectation come from host startup code, never a request,
-receipt, image, candidate, draft, or generated client.
+Ordinary registry recovery checks the expectation. An initialized registry
+must match the cursor and policy; an uninitialized expectation accepts only
+the exact not-initialized result. Busy, malformed, substituted, or unexpectedly
+initialized roots fail. Host startup code supplies the root and expectation;
+requests, receipts, images, candidates, drafts, and generated clients cannot.
 
 The coordinator opens and retains the authenticated registry-root and metadata
 directory identities for its complete lifetime. Every recovery, initialize,

@@ -6,12 +6,17 @@ Audience: all documentation readers.
 
 # Public documentation
 
+## Start here
+
 - [Documentation overview](index.md)
 - [Install](INSTALL.md)
 - [Quickstart](QUICKSTART.md)
 - [Using the SEMAPRAX CLI](CLI-GUIDE.md)
 - [Language tour](LANGUAGE-TOUR.md)
 - [GitHub Linguist submission v1](GITHUB-LINGUIST-SUBMISSION-V1.md)
+
+## Agent workflows
+
 - [Agent quick reference](AGENT-QUICK-REFERENCE.md)
 - [Agent iterative lifecycle v2](AGENT-ITERATIVE-LIFECYCLE-V2.md)
 - [Agent typed effects v3](AGENT-TYPED-EFFECTS-V3.md)
@@ -41,6 +46,9 @@ Audience: all documentation readers.
 - [Generic Iterator Helpers v1](GENERIC-ITERATORS-V1.md)
 - [Generic Iterator Operations v1](GENERIC-ITERATOR-OPERATIONS-V1.md)
 - [Bounded Lazy Iterator Adapters v1](BOUNDED-LAZY-ITERATOR-ADAPTERS-V1.md)
+
+## Libraries and tools
+
 - [Standard library catalog](STANDARD-LIBRARY-CATALOG.md)
 - [Language shapes catalog](LANGUAGE-SHAPES-CATALOG.md)
 - [Public Project Scaffold Capsule v1](PROJECT-SCAFFOLD-V1.md)
@@ -53,13 +61,15 @@ Audience: all documentation readers.
 - [Unified CLI: review, verify, agent, query, package, add, fetch](UNIFIED-CLI-V1.md)
 - [Human diagnostic locations](HUMAN-DIAGNOSTICS-V1.md)
 - [Changelog](../CHANGELOG.md)
-- [Changelog archive](CHANGELOG-ARCHIVE.md)
 - [Changelog summary](CHANGELOG-SUMMARY.md)
 - [Examples index](../examples/README.md)
 - [Canonical comments](CANONICAL-COMMENTS-V1.md)
 - [Calculator project publication](NEW-PROJECT-PUBLICATION-V1.md)
 - [Standalone project creation](NEW-PROJECT-STANDALONE-V1.md)
 - [Windows owned npm publication](WINDOWS-OWNED-NPM-PUBLICATION-V1.md)
+
+## Doctor and installation internals
+
 - [Doctor version-probe lifecycle](DOCTOR-PROBE-V1.md)
 - [Doctor sealed input](DOCTOR-SEALED-INPUT-V1.md)
 - [Doctor offline bundle](DOCTOR-OFFLINE-BUNDLE-V1.md)
@@ -83,6 +93,11 @@ Audience: all documentation readers.
 - [RFC 0003: Cleanup and resource ABI](RFC-0003-CLEANUP-AND-RESOURCE-ABI.md)
 - [Semantic Kernel v1](SEMANTIC-KERNEL-V1.md)
 - [Kernel-0 proof mechanization v1](KERNEL-PROOF-MECHANIZATION-V1.md)
+- [Kernel-0 Rung-2 Bootstrap Artifact v1](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V1.md)
+- [Kernel-0 Rung-2 Bootstrap Artifact v2](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V2.md)
+- [Kernel-0 Rung-2 Formatter Authority v1](KERNEL-ZERO-RUNG-TWO-AUTHORITY-V1.md)
+- [Kernel-0 Rung-2 Owned Handoff v1](KERNEL-ZERO-RUNG-TWO-OWNED-HANDOFF-V1.md)
+- [Kernel-0 Rung-2 Target and Recovery Evidence v1](KERNEL-ZERO-RUNG-TWO-TARGET-RECOVERY-V1.md)
 - [Standard Library v1](STANDARD-LIBRARY-V1.md)
 - [Workflow Profiling v1](WORKFLOW-PROFILING-V1.md)
 - [Format Writer v1](FORMAT-WRITER-V1.md)
@@ -409,8 +424,6 @@ Audience: all documentation readers.
 - [Public Generic Descriptor v1](PUBLIC-GENERIC-DESCRIPTOR-V1.md)
 - [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md)
 - [Public Generic Carrier Hostile Corpus v1](PUBLIC-GENERIC-CARRIER-HOSTILE-CORPUS-V1.md)
-- [Public Generic Wasm Provider Target v1](PUBLIC-GENERIC-WASM-PROVIDER-TARGET-V1.md)
-- [Public Generic Wasm Component v1](PUBLIC-GENERIC-WASM-COMPONENT-V1.md)
 - [C header emission](C-HEADER-V1.md)
 - [C++ shim projection](CXX-SHIM-V1.md)
 - [C++ scalar package](CXX-PACKAGE-V1.md)
@@ -434,10 +447,18 @@ Audience: all documentation readers.
 - [Offline deterministic package resolver](OFFLINE-PACKAGE-RESOLVER-V1.md)
 - [Offline published semantic lock snapshot](OFFLINE-PUBLISHED-SEMANTIC-LOCK-SNAPSHOT-V1.md)
 - [Offline deterministic package resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md)
-- [Package Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md)
 - [Package registry snapshot v1](PACKAGE-REGISTRY-SNAPSHOT-V1.md)
-- [Package Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md)
+- [Package registry snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md)
+- [Package registry snapshot v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md)
+- [Package artifact manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md)
+- [Package leaf artifact manifest v1](PACKAGE-LEAF-ARTIFACT-MANIFEST-V1.md)
 - [Package registry trust v1](PACKAGE-REGISTRY-TRUST-V1.md)
+- [Package registry trust v2](PACKAGE-REGISTRY-TRUST-V2.md)
+- [Registry-v3 durable local host v2](PACKAGE-REGISTRY-HOST-V2.md)
+- [Signed managed-store to resolver-cache bridge v1](PACKAGE-REGISTRY-CACHE-BRIDGE-V1.md)
+- [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR-TRANSPORT-V1.md)
+- [Package registry mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md)
+- [Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md)
 - [Package registry federation v1](PACKAGE-REGISTRY-FEDERATION-V1.md)
 - [Registry-bound resolution v1](PACKAGE-REGISTRY-BOUND-RESOLUTION-V1.md)
 - [Offline pure Wasm package build](OFFLINE-PURE-WASM-PACKAGE-BUILD-V1.md)
@@ -461,13 +482,15 @@ Audience: all documentation readers.
 - [Required CI checks](CI-REQUIRED-CHECKS-V1.md)
 - [Release process and tag evidence](RELEASE-PROCESS.md)
 - [Release signing and provenance policy v1](RELEASE-SIGNING-POLICY-V1.md)
+- [v0.6.0 partial hosted gate evidence](RELEASE-0.6.0-STATUS.md)
 - [v0.4.0 implementation and evidence baseline](RELEASE-0.4.0-STATUS.md)
 - [Roadmap](ROADMAP.md)
 - [Protocol migrations](MIGRATIONS.md)
+- [Historical changelog archive](CHANGELOG-ARCHIVE.md)
 
 ## Design decisions and drafts
 
-- [ADR 0001: Graph-first repository navigation](decisions/0001-graphify.md)
+- [ADR 0001: Why Graphify was deferred](decisions/0001-graphify.md)
 - [ADR 0002: Managed workspace generations](decisions/0002-managed-workspace-generations.md)
 - [ADR 0003: Maintained generated-package support for owned-data-api.v1 (Rust)](decisions/0003-maintained-generated-package-support.md)
 - [ADR 0004: Release signing and build provenance via Sigstore keyless identity](decisions/0004-release-signing-and-build-provenance.md)
@@ -517,11 +540,8 @@ Audience: all documentation readers.
 - [Native Rust interoperability](NATIVE-RUST-INTEROP-V1.md)
 - [Rust-host sanitizer evidence](RUST-HOST-SANITIZERS.md)
 - [Private WIT boundary](WIT-COMPONENT-BOUNDARY-V1.md)
-- [Kernel-0 Rung-2 Formatter Authority v1](KERNEL-ZERO-RUNG-TWO-AUTHORITY-V1.md)
-- [Kernel-0 Rung-2 Bootstrap Artifact v1](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V1.md)
-- [Kernel-0 Rung-2 Bootstrap Artifact v2](KERNEL-ZERO-RUNG-TWO-BOOTSTRAP-V2.md)
-- [Kernel-0 Rung-2 Owned Handoff v1](KERNEL-ZERO-RUNG-TWO-OWNED-HANDOFF-V1.md)
-- [Kernel-0 Rung-2 Target and Recovery Evidence v1](KERNEL-ZERO-RUNG-TWO-TARGET-RECOVERY-V1.md)
+- [Public Generic Wasm Provider Target v1](PUBLIC-GENERIC-WASM-PROVIDER-TARGET-V1.md)
+- [Public Generic Wasm Component v1](PUBLIC-GENERIC-WASM-COMPONENT-V1.md)
 
 ## Private platform adapters
 

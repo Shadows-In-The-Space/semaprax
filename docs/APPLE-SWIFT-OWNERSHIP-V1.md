@@ -8,9 +8,9 @@ authoring-time, ignored, device/simulator, or separately provisioned evidence
 below retains its narrower scope; public promotion, registry publication and
 broader product completion remain separately gated.
 
-This is one bounded Swift projection of the exact callable-v3
-`token.discard-two` fixture. It is not a public Swift package, framework API,
-or permission to open `SPX-B104`.
+This is a bounded Swift projection of the callable-v3 `token.discard-two`
+fixture. It is not a public Swift package, framework API, or permission to
+open `SPX-B104`.
 
 ## Frozen boundary
 

@@ -7,10 +7,10 @@ General semantic migration and product completion remain separate.
 Audience: compiler contributors, agent builders and semantic tool authors.
 
 The existing `rename_declaration` intention selects source record fields,
-variant cases and variant payload fields by stable identity. The compiler
-derives their defining and referring tokens, including cross-file consumers,
-and returns canonical source through the ordinary immutable candidate route.
-No source syntax, public graph schema, request fields or authority are added.
+variant cases and variant payload fields by stable identity. The compiler finds their defining tokens and references, including cross-file
+consumers, then returns canonical source through the ordinary immutable
+candidate route. No source syntax, public graph schema, request fields or
+authority are added.
 
 ```json
 {"kind":"rename_declaration","target":"payments.amount.cents","name":"minor_units"}
@@ -29,9 +29,9 @@ An unrelated owner may retain a member with the same name.
 There is no additional Copy-only or monomorphic restriction. Existing Project
 admission and the authenticated AST/HIR collector determine admissible source
 forms. Missing or ambiguous reference joins reject the whole operation.
-Unsupported class/method, upcast, native-import and command-expression joins
-remain outside the collector; their presence elsewhere in the source set can
-therefore reject a member rename as well.
+The collector still excludes class/method, upcast, native-import and
+command-expression joins. Their presence elsewhere in the source set can also
+cause a member rename to be rejected.
 
 Record field renames update their declaration, constructor and update labels,
 projections and record-pattern labels. Variant case renames update case

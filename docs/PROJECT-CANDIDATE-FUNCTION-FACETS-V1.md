@@ -10,10 +10,10 @@ Audience: agents and embedding hosts navigating exact function facts in a
 retained final candidate.
 
 Image [Function Facets v1](SEMANTIC-IMAGE-FACETS-V1.md) exposes compact declared
-function summaries and nine paged HIR facets. This candidate projection derives
-an invocation-local semantic image from one exact fully admitted candidate and
-reuses those existing facts and item order. It includes changed and newly added
-functions without treating the original base image as candidate evidence.
+function summaries and nine paged HIR facets. This candidate report derives a
+temporary semantic image from one exact, fully admitted candidate and reuses
+those facts and their order. It includes changed and new functions without
+using the original base image as evidence about the candidate.
 
 ## Library API
 
@@ -54,10 +54,10 @@ heterogeneous item is carried as
 so generated clients can validate the envelope without pretending to own every
 compiler-specific interior.
 
-Only declared resolved functions in the final candidate are selectable. A
-declaration present only in an earlier source, a non-function stable ID, a
-compiler-owned function or a missing target remains unavailable. This report
-does not turn a removed declaration into retained final-candidate meaning. The
+Only declared, resolved functions in the final candidate can be selected.
+Earlier-only declarations, non-function stable IDs, compiler-owned functions
+and missing targets are unavailable. Removed declarations do not become part
+of the final candidate through this report. The
 current typed intent catalogue has no declaration-removal producer, so authored
 evidence exercises a missing ID and an actual added record through the same
 final-HIR unavailable path rather than fabricating a removal case.

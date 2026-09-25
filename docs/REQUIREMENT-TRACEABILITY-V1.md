@@ -10,21 +10,16 @@ Audience: agents and reviewers who must decide whether a requirement is
 technically satisfied by exact, current evidence, and compiler contributors
 extending requirement/intent traceability toward the full scope of #202.
 
-This is a deliberately narrow slice of
-[#202](https://github.com/wavect/semaprax/issues/202) ("Add first-class
-requirement, intent, scenario, and evidence traceability objects"): **binding
-a requirement's acceptance criteria to exact assurance subjects that fail
-closed when the subject changes**, not the full requirement/intent/scenario
-object model #202 describes. See "Explicitly out of scope" below for the
-rest of #202 this tranche does not attempt.
+This narrow slice of [#202](https://github.com/wavect/semaprax/issues/202)
+binds acceptance criteria to exact assurance subjects and fails closed when
+a subject changes. It does not implement #202's full requirement, intent,
+scenario, and evidence object model. The exclusions appear below.
 
 ## The problem this closes
 
-A requirement tracked against an *approximate* subject — a file path, a
-declaration's display name, a revision string trusted at face value — is not
-really tracked: any of those can drift silently and the requirement would
-keep reporting whatever it last observed. This module binds a requirement
-criterion to an **exact assurance subject**:
+A file path, display name, or unchecked revision string can drift while a
+requirement still reports its old result. This module instead binds a criterion
+to an **exact assurance subject**:
 [`crate::assurance_manifest::obligation_id`](../src/assurance_manifest/obligation.rs)
 — itself a length-prefixed, collision-resistant identity derived from a
 declaration's persistent `stable_id`, a closed obligation kind, and a

@@ -33,10 +33,9 @@ filter_fold<T, A>(own Iter<T>, keep: fn(T) -> bool, initial: A, combine: fn(A, T
 map_fold<T, U>(own Iter<T>, transform: fn(T) -> U, initial: U, combine: fn(U, U) -> U) -> U
 ```
 
-`first_if`/`first_if_step` is a one-pull adapter: it advances the source
-iterator exactly once (`iter_next`) and lets the caller drop the untouched
-remainder — which may still hold unconsumed elements — without ever reaching
-exhaustion or pulling a second element. `first_if_step` takes `own
+`first_if`/`first_if_step` pulls from the source iterator exactly once through
+`iter_next`. The caller can then drop the untouched remainder, including any
+unconsumed elements, without exhausting the iterator or pulling a second item. `first_if_step` takes `own
 IterStep<T>` (the already-pulled step) rather than `own Iter<T>` so that its
 body's `match own step { IterStep::Done{} => …, IterStep::Yield{…} => … }` is
 admitted by the existing narrow rule in
@@ -44,10 +43,9 @@ admitted by the existing narrow rule in
 an owned `IterStep<T>` parameter or return type before a generic function
 body may pattern-match a `Yield`/`Done` case at all (see "What this profile
 does **not** add" below for why a version with `own Iter<T>` and an internal
-`iter_next` call inside the `match` is refused). `first_if` is the thin,
-ergonomic wrapper callers actually use; it calls `iter_next<T>` and delegates
-to `first_if_step`, staying inside the simpler direct-scalar call-composition
-shape that needs no `match` admission at all.
+`iter_next` call inside the `match` is refused). Callers use the thin `first_if` wrapper. It calls `iter_next<T>` and delegates
+to `first_if_step`, staying within the direct-scalar call-composition shape,
+which needs no `match` admission.
 
 `map_filter`, `filter_fold`, and `map_fold` are single-pass fused pipelines:
 each performs exactly one `for own item in input` traversal and calls each
@@ -59,13 +57,12 @@ output) or zero (`filter_fold`/`map_fold`, which have no `Vec` in their body
 at all — grep `examples/lazy-iterator-adapters.spx` for `vec_with_capacity`
 inside those two bodies and find none).
 
-Both `map_fold` and `map_filter` stay within the existing hard
-`(1..=2)`-type-parameter generic-function admission ceiling
-(`src/source_verify/declaration/functions.rs`,
-`src/hir/generic_collection.rs`) by pinning the accumulator's type to the
-mapped output type `U` rather than adding a third independent type parameter;
-a `map_fold<T, U, A>` with an independently-typed accumulator is refused by
-that ceiling today and is out of this profile's scope.
+Both `map_fold` and `map_filter` stay within the hard `(1..=2)` type-parameter
+limit in `src/source_verify/declaration/functions.rs` and
+`src/hir/generic_collection.rs`. They use mapped output type `U` for the
+accumulator rather than adding an independent third type. The limit rejects
+`map_fold<T, U, A>` with an independently typed accumulator; that shape remains
+outside this profile.
 
 ## What this profile does **not** add, and the exact diagnostics why
 

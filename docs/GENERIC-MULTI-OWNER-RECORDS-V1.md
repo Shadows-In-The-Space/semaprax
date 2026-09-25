@@ -10,12 +10,11 @@ results retain their original scope rather than becoming a new hosted run.
 
 Audience: compiler contributors and language reviewers.
 
-An internal generic record function may accept multiple separately owned,
-individually admitted record parameters and return an explicitly declared
-admitted owning record. Existing parameter, substitution, aggregate-field,
-owned-leaf and concrete-instance bounds apply. The first focused corpus uses
-two distinct owners and all eight Copy marker substitutions; it does not add
-an arbitrary two-parameter semantic limit.
+An internal generic function may take several separately owned, admitted
+records and return an explicitly declared owning record. Existing parameter,
+substitution, aggregate-field, owned-leaf, and concrete-instance bounds apply.
+The focused corpus uses two owners and all eight Copy markers; that test shape
+does not impose a two-parameter language limit.
 
 The result may combine the owners into a nested record, reconstruct their
 owning leaves into a different declared shape, or replace an owning field using

@@ -1,12 +1,13 @@
 # Direct Agent Runtime v2
 
-Status: **HOSTED GREEN** for the bounded v0.4.0 implementation.
-
 Audience: runtime integrators and compiler contributors.
 
-The [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md) supersedes the former
-local-only status for typed execution, actual-root association, and the
-implemented durable integrations.
+Direct Runtime v2 binds checked Project code, deployment, typed effects, and
+one invocation before execution. The resulting roots describe that execution;
+they do not grant host or publication authority.
+
+Status: **HOSTED GREEN** under the [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md)
+for typed execution, actual-root association, and implemented durable paths.
 
 `bind_agent_runtime_v2` consumes an exact retained Project selection, an already
 admitted ProgramRoot v1/v2/v3, source Agent and Step identities, a deployment,

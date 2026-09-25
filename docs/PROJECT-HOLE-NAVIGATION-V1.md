@@ -8,18 +8,18 @@ separately gated.
 
 Audience: agent builders, editor integrators and embedding hosts.
 
-Typed-hole navigation exposes a compact summary and selected detail pages over
-an existing immutable draft's full context. It covers body, body-expression and
-contract-expression holes without inserting placeholders into source or
-changing their admission rules. The full `hole_context` / `hole/query` report
-remains available and byte-for-byte unchanged.
+Typed-hole navigation gives a compact summary and selected detail pages for an
+immutable draft's full context. It covers body, body-expression and
+contract-expression holes without adding source placeholders or changing
+admission rules. The full `hole_context` / `hole/query` report remains
+available with unchanged bytes.
 
 ## Summary and detail selection
 
 The separate [fill-suggestion query](PROJECT-HOLE-FILL-SUGGESTIONS-V1.md) derives
 bounded place/call proposals and previews each through ordinary fill replay.
-It leaves the summary and four facets below unchanged; lexical call rows remain
-possibilities rather than prevalidated fills.
+The summary and four facets below stay unchanged. Lexical call rows show
+possibilities, not fills that have already passed validation.
 
 `ProjectCandidateDraft::hole_summary(expected_draft, hole_id)` returns
 `semaprax.project-hole-summary.v1`. The summary binds the exact draft, hole,

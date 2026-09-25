@@ -8,11 +8,11 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-Static implementations bind local protocol requirements to existing ordinary
-functions by persistent declaration identity. The compiler checks these source
-declarations before resolving backend HIR. There is no dispatch instruction,
-protocol value, runtime witness table, new ABI, or runtime receiver conversion.
-An ordinary function call still has its ordinary checked behavior.
+Static implementations bind local protocol requirements to existing functions
+by persistent declaration identity. The compiler checks them before backend
+HIR resolution. They add no dispatch instruction, protocol value, runtime
+witness table, ABI, or receiver conversion; ordinary calls keep their checked
+behavior.
 
 ```spx
 module geometry;

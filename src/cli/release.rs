@@ -895,7 +895,7 @@ mod tests {
             sha256(manifest.as_bytes())
         );
         let claim = format!(
-            r#"{{"schema":"semaprax.release-signature-claim.v1","subject_digest":"{}","subject_name":"release-provenance.json","identity":{{"issuer":"https://token.actions.githubusercontent.com","subject":"repo:wavect/semaprax:ref:refs/tags/{TAG}","workflow_ref":"wavect/semaprax/.github/workflows/ci.yml@refs/tags/{TAG}"}},"algorithm":"sigstore-cosign-bundle-v0.3","signature":"{CLAIM_SIGNATURE}","certificate":"{CLAIM_CERTIFICATE}"}}"#,
+            r#"{{"schema":"semaprax.release-signature-claim.v1","subject_digest":"{}","subject_name":"release-provenance.json","identity":{{"issuer":"https://token.actions.githubusercontent.com","subject":"repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/{TAG}","workflow_ref":"wavect/semaprax/.github/workflows/ci.yml@refs/tags/{TAG}"}},"algorithm":"sigstore-cosign-bundle-v0.3","signature":"{CLAIM_SIGNATURE}","certificate":"{CLAIM_CERTIFICATE}"}}"#,
             sha256(provenance.as_bytes())
         );
         std::fs::write(directory.join(MANIFEST_FILE), &manifest).unwrap();

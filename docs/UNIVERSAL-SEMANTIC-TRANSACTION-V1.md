@@ -12,10 +12,9 @@ change evidence.
 Universal Semantic Transaction v1 is the first authority-free transaction
 envelope over [Canonical Semantic Workspace Revision
 v1](CANONICAL-SEMANTIC-WORKSPACE-REVISION-V1.md). It does not replace Project
-Candidate v1 or publish source. It binds one exact immutable base revision,
-validates one typed intention through the existing complete Project candidate
-rebuild, and returns deterministic intent, impact, review, result, and evidence
-artifacts.
+Candidate v1 or publish source. It binds one exact immutable base revision and validates one typed intention
+through the existing complete Project candidate rebuild. The returned intent,
+impact, review, result and evidence artifacts are deterministic.
 
 The additive [Universal Semantic Transaction Composition
 v1](UNIVERSAL-SEMANTIC-TRANSACTION-COMPOSITION-V1.md) derives structural diffs,
@@ -52,18 +51,16 @@ Project Candidate diagnostics retain their existing meanings.
 
 The first v1 operation is `rename_display_name`, with `target`,
 `expected_old_value`, and `new_value`. The target must be one explicit,
-monomorphic, non-`main` function stable identity. The expected old name is read
-from the immutable base before candidate creation. A different base composite
-revision or old name fails closed.
+monomorphic, non-`main` function stable identity. Before creating a candidate, the operation reads the expected old name from
+the immutable base. A mismatched base composite revision or old name is rejected.
 
 Project Candidate's `rename_declaration` implementation performs the actual
 typed rewrite, caller migration, canonical-source rebuild, ownership and
 cleanup replay, and native/Wasm admission. V1 additionally requires every base
 and candidate source **that the operation rewrites** to be comment-free
-canonical source. This bounded rule prevents the reused candidate formatter
-from silently erasing comments or normalizing unrelated trivia. A
-comment-bearing or noncanonical *rewritten* source is not admitted by this
-first slice.
+canonical source. This restriction prevents the reused formatter from silently removing comments
+or normalizing unrelated trivia. This first slice rejects any *rewritten*
+source that contains comments or is noncanonical.
 
 Sources the operation does not rewrite carry no such requirement (issue
 #274). `ProjectCandidate::apply`'s candidate-materialization step preserves

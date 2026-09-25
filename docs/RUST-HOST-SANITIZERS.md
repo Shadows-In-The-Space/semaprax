@@ -4,12 +4,14 @@ Audience: maintainers, host integrators, and compiler contributors.
 
 Status: **green public Linux Rust-host ASan evidence**.
 
-SEMAPRAX has two intentionally separate Linux sanitizer lanes:
+Two Linux sanitizer lanes test different boundaries:
 
 - `callable-host-sanitizers` uses stable Rust and Clang AddressSanitizer plus UndefinedBehaviorSanitizer on compiler-generated C providers. It proves the provider/ABI boundary, but it does not instrument the Rust host.
 - `rust-host-address-sanitizer` instruments `semaprax-native-host` and its Rust standard-library dependencies with AddressSanitizer, links the generated Clang provider into the same sanitizer runtime, and executes the real callable host and authoritative generated-callable corpus.
 
-The Rust lane is pinned to `nightly-2026-07-16`, whose compiler is `1.99.0-nightly` at commit `d0babd8b6b05ef9bb65d42f928cef4129d64cf65`. The exact pin prevents a moving nightly from silently changing this evidence. It uses:
+The Rust lane pins `nightly-2026-07-16` (compiler `1.99.0-nightly`, commit
+`d0babd8b6b05ef9bb65d42f928cef4129d64cf65`) so a moving nightly cannot
+silently change the evidence. It uses:
 
 ```text
 -Zsanitizer=address

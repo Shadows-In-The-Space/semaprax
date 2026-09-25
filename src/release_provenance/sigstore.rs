@@ -7,8 +7,12 @@
 //! has not occurred.
 
 use sigstore_verify::trust_root::TrustedRoot;
+use sigstore_verify::types::bundle::VerificationMaterialContent;
 use sigstore_verify::types::Bundle;
 use sigstore_verify::{VerificationPolicy, Verifier};
+use x509_cert::der::asn1::Utf8StringRef;
+use x509_cert::der::Decode;
+use x509_cert::Certificate;
 
 use super::{Diagnostic, ExpectedReleaseIdentity, OfflineBundleVerificationCapability};
 
@@ -73,7 +77,53 @@ fn verify_bound_bundle(
         subject_bytes,
         &bundle,
         trusted_root_text,
-    )
+    )?;
+    verify_immutable_repository_claims(&bundle, expected_identity)
+}
+
+/// The workflow URL SAN alone is name-based. Pin the original GitHub OIDC
+/// subject and immutable repository/owner IDs from the *verified* Fulcio leaf
+/// certificate so a synthetic structural claim cannot stand in for them.
+fn verify_immutable_repository_claims(
+    bundle: &Bundle,
+    expected_identity: &ExpectedReleaseIdentity,
+) -> Result<(), Diagnostic> {
+    let VerificationMaterialContent::Certificate(content) = &bundle.verification_material.content
+    else {
+        return Err(verification_refusal());
+    };
+    let certificate =
+        Certificate::from_der(content.raw_bytes.as_bytes()).map_err(|_| verification_refusal())?;
+    verify_certificate_repository_claims(&certificate, expected_identity)
+}
+
+fn verify_certificate_repository_claims(
+    certificate: &Certificate,
+    expected_identity: &ExpectedReleaseIdentity,
+) -> Result<(), Diagnostic> {
+    for (oid, expected) in [
+        ("1.3.6.1.4.1.57264.1.24", expected_identity.subject.as_str()),
+        ("1.3.6.1.4.1.57264.1.15", "1326961553"),
+        ("1.3.6.1.4.1.57264.1.17", "47505194"),
+    ] {
+        let mut matches = certificate
+            .tbs_certificate
+            .extensions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|extension| extension.extn_id.to_string() == oid);
+        let extension = matches.next().ok_or_else(verification_refusal)?;
+        if matches.next().is_some() {
+            return Err(verification_refusal());
+        }
+        let value = Utf8StringRef::from_der(extension.extn_value.as_bytes())
+            .map_err(|_| verification_refusal())?;
+        if value.as_str() != expected {
+            return Err(verification_refusal());
+        }
+    }
+    Ok(())
 }
 
 fn verify_bundle_with_certificate_identity(
@@ -147,7 +197,7 @@ mod tests {
             repository: "wavect/semaprax".to_owned(),
             workflow_path: ".github/workflows/ci.yml".to_owned(),
             tag: "v1.2.3".to_owned(),
-            subject: "repo:wavect/semaprax:ref:refs/tags/v1.2.3".to_owned(),
+            subject: "repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/v1.2.3".to_owned(),
             workflow_ref: "wavect/semaprax/.github/workflows/ci.yml@refs/tags/v1.2.3".to_owned(),
         }
     }
@@ -169,6 +219,66 @@ mod tests {
             "{}\n",
             serde_json::to_string(&value).expect("fixture trusted root must encode")
         )
+    }
+
+    fn extension(oid: &str, value: &str) -> x509_cert::ext::Extension {
+        use x509_cert::der::asn1::OctetString;
+        use x509_cert::der::Encode;
+        x509_cert::ext::Extension {
+            extn_id: oid.parse().expect("test OID"),
+            critical: false,
+            extn_value: OctetString::new(
+                Utf8StringRef::new(value)
+                    .expect("test UTF8")
+                    .to_der()
+                    .expect("test DER"),
+            )
+            .expect("test octet string"),
+        }
+    }
+
+    #[test]
+    fn immutable_github_certificate_claims_are_required_exactly_once() {
+        let bundle = fixture_bundle();
+        let VerificationMaterialContent::Certificate(content) =
+            &bundle.verification_material.content
+        else {
+            panic!("fixture must contain a certificate");
+        };
+        let mut cert = Certificate::from_der(content.raw_bytes.as_bytes()).expect("fixture DER");
+        cert.tbs_certificate
+            .extensions
+            .as_mut()
+            .expect("fixture extensions")
+            .retain(|extension| {
+                !matches!(
+                    extension.extn_id.to_string().as_str(),
+                    "1.3.6.1.4.1.57264.1.24" | "1.3.6.1.4.1.57264.1.15" | "1.3.6.1.4.1.57264.1.17"
+                )
+            });
+        assert_stable_refusal(
+            verify_certificate_repository_claims(&cert, &identity()).unwrap_err(),
+        );
+        let extensions = cert.tbs_certificate.extensions.get_or_insert_with(Vec::new);
+        extensions.push(extension("1.3.6.1.4.1.57264.1.24", &identity().subject));
+        extensions.push(extension("1.3.6.1.4.1.57264.1.15", "1326961553"));
+        extensions.push(extension("1.3.6.1.4.1.57264.1.17", "47505194"));
+        verify_certificate_repository_claims(&cert, &identity()).expect("exact immutable claims");
+        cert.tbs_certificate
+            .extensions
+            .as_mut()
+            .unwrap()
+            .push(extension("1.3.6.1.4.1.57264.1.17", "47505194"));
+        assert_stable_refusal(
+            verify_certificate_repository_claims(&cert, &identity()).unwrap_err(),
+        );
+        let extensions = cert.tbs_certificate.extensions.as_mut().unwrap();
+        extensions.pop();
+        let last = extensions.len() - 1;
+        extensions[last] = extension("1.3.6.1.4.1.57264.1.17", "other-owner");
+        assert_stable_refusal(
+            verify_certificate_repository_claims(&cert, &identity()).unwrap_err(),
+        );
     }
 
     #[test]

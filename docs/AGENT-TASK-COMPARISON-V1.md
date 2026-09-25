@@ -1,14 +1,16 @@
 # Agent task comparison v1
 
-Status: implemented comparison framework and three-task corpus; **HOSTED GREEN** under the
+Audience: benchmark operators, agent integrators, and comparison reviewers.
+
+This framework pairs identical coding tasks across two available Semaprax
+workflows. It defines how to compare them, but contains no comparative model
+observations or productivity result. The external Zero lane is reserved and
+unrun; it has no implementation or parity claim.
+
+Status: implemented framework and three-task corpus; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-Comparative model trials have no observations or productivity results. The external
-Zero lane remains an unexecuted reservation, not an implementation or parity claim.
 
-Audience: benchmark operators, agent integrators, and reviewers of comparative
-evidence.
-
-This contract closes the measurement-design gap identified by
+It closes the measurement-design gap identified by
 [Agent Task Economics v1](AGENT-TASK-ECONOMICS-V1.md). That earlier report
 records exact compiler-protocol traffic for one scripted graph workflow. It
 does not compare agents. This framework defines paired, externally observed

@@ -252,7 +252,10 @@ fn service_template_has_exact_bytes_and_passes_the_developer_loop() {
 #[test]
 fn generated_project_validation_never_reopens_the_ambient_staging_tree() {
     let implementation = include_str!("../src/new_project.rs");
-    let scaffold = include_str!("../../../src/project/scaffold.rs");
+    let scaffold = concat!(
+        include_str!("../../../src/project/scaffold.rs"),
+        include_str!("../../../src/project/scaffold/service_config.rs"),
+    );
     assert!(scaffold.contains("validate_owned_project_test"));
     assert!(!implementation.contains("project::with_authenticated_project"));
     assert!(

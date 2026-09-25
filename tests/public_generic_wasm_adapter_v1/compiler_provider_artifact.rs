@@ -304,7 +304,7 @@ if (instance.exports.spx_pg_v1_provider_close(opened.value) !== 0) throw new Err
 }
 
 #[test]
-fn generated_typescript_package_uses_canonical_frames_with_the_compiled_provider() {
+fn generated_typescript_package_projects_frozen_hostility_through_the_compiled_provider() {
     assert!(
         node_available(),
         "generated compiled-provider consumer requires Node"
@@ -362,6 +362,21 @@ fn generated_typescript_package_uses_canonical_frames_with_the_compiled_provider
         2,
         "the Phase-B compiler provider has two owned leaves"
     );
+    // Keep this a projection, not a shadow corpus: the generated package has
+    // a descriptor-specific canonical frame, so reuse the frozen hostile
+    // recipe's one-byte trailing edit and its closed malformed outcome rather
+    // than feeding the fixture's unrelated descriptor-bound bytes to it.
+    let trailing = semaprax::public_generic_abi::carrier::hostile_corpus::cases()
+        .into_iter()
+        .find(|case| case.id == "trailing_byte_after_self_digest")
+        .expect("the frozen carrier corpus retains its trailing-byte recipe");
+    assert_eq!(
+        trailing.expected_code(),
+        Some(
+            semaprax::public_generic_abi::carrier::reference_decoder::CarrierRefusal::Malformed
+                .code()
+        )
+    );
     fs::write(
         package.join("test/compiled-provider.mjs"),
         format!(
@@ -406,6 +421,41 @@ try {{
     "the first physical release status stays primary",
   );
   assert.equal(resultReleases, 1, "a failing result release must not be retried by catch cleanup");
+  provider.close();
+}} finally {{
+  WebAssembly.instantiate = originalInstantiate;
+}}
+let malformedReleases = 0;
+WebAssembly.instantiate = async (...args) => {{
+  const instance = await Reflect.apply(originalInstantiate, WebAssembly, args);
+  return {{ exports: new Proxy({{}}, {{
+    get(_target, property) {{
+      const value = Reflect.get(instance.exports, property);
+      if (property === "spx_pg_v1_result_release") return handle => {{
+        malformedReleases += 1;
+        return Reflect.apply(value, instance.exports, [handle]);
+      }};
+      if (property !== "spx_pg_v1_result_export") return value;
+      return (handle, pointer, capacity) => {{
+        const lane = Reflect.apply(value, instance.exports, [handle, pointer, capacity]);
+        if (capacity === 0) return lane + (1n << 32n);
+        const bytes = new Uint8Array(instance.exports.memory.buffer);
+        const written = Number((lane >> 32n) & 0xffffffffn);
+        assert.equal(Number(lane & 0xffffffffn), 0, "compiled export must copy before the hostile edit");
+        bytes[pointer + written] = 0xff;
+        return lane + (1n << 32n);
+      }};
+    }},
+  }}) }};
+}};
+try {{
+  const provider = await Provider.open(wasm);
+  assert.throws(
+    () => provider.transform({{ [left]: Uint8Array.from([1, 2]), [right]: Uint8Array.from([7, 8, 9]) }}),
+    error => error instanceof SemapraxPublicGenericException && error.detail.kind === "result-rejected" && error.detail.reason === "carrier-framing",
+    "the frozen trailing-byte recipe must reject at generated canonical-result decode",
+  );
+  assert.equal(malformedReleases, 1, "the malformed compiled result releases exactly once before close");
   provider.close();
 }} finally {{
   WebAssembly.instantiate = originalInstantiate;

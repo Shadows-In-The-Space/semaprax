@@ -8,8 +8,8 @@ Audience: language users, tool authors, and compiler contributors.
 
 ### Historical evidence record
 
-The following original record describes its stated subjects and host scope,
-not the current release evidence ceiling.
+This historical record applies only to its stated subjects and host scope. It
+is not the current release evidence ceiling.
 
 implemented as a bounded public Core-Wasm and generated JavaScript/
 TypeScript package profile. Local executable evidence covers admission,
@@ -44,11 +44,12 @@ semaprax build calculator.spx --target web \
   -o calculator-web
 ```
 
-Selection is by persistent declaration identity, never by display name. A
-source-level function rename that preserves `@id("calculator.add")` therefore
-preserves the generated API key and raw Wasm adapter symbol.
-Stable IDs beginning with `-` use the unambiguous `--export=<stable-id>` CLI
-spelling; the ordinary separated spelling remains valid for all other IDs.
+Select functions by persistent declaration identity, not display name.
+Renaming a function while keeping `@id("calculator.add")` therefore keeps its
+generated API key and raw Wasm adapter symbol.
+
+For an ID beginning with `-`, use `--export=<stable-id>` so the CLI can parse it
+unambiguously. The ordinary separated spelling remains valid for all other IDs.
 
 This is a build profile, not a package manager, Component Model interface, or
 general JavaScript/TypeScript interoperability layer.
@@ -158,11 +159,11 @@ throws a `TypeError` for anything else. It never truncates, rounds, or wraps:
 | `f64` | `number` | every `number`, `NaN` and infinities included |
 | `bool` | `boolean` | `true`, `false` |
 
-`char` is a Unicode scalar value as a number, not a one-character string: the
-profile stays numeric and claims no string ABI. An `f32` argument must already
-be exactly representable, so a narrowing is written `Math.fround(x)` at the
-call site instead of happening silently at the boundary. Returned values use
-the same representations and are re-checked before they leave the facade.
+Pass `char` as a numeric Unicode scalar value, not a one-character string.
+This numeric profile defines no string ABI. An `f32` argument must already be
+exactly representable; write `Math.fround(x)` at the call site when narrowing
+is intended. The boundary never narrows silently. Results use the same
+representations and are checked again before leaving the facade.
 
 A generated facade carries only the guards for the scalars its package
 projects, so an `i64`/`bool` package renders the same bytes it always has.

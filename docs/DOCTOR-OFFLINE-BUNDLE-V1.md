@@ -9,16 +9,14 @@ Audience: CLI/platform contributors and reviewers.
 
 ## Boundary
 
-`DoctorOfflineBundle::parse` consumes one [sealed-input snapshot](DOCTOR-SEALED-INPUT-V1.md)
-and an explicit profile selector. It binds the encoded selector to that argument
-and the encoded architecture to the compiled native Linux host. The returned
-opaque bundle owns the input and bounded range indexes. Read-only file/tool views
-borrow path and payload slices from that retained input; they cannot outlive it.
-No second payload copy or serialized HIR is involved. The unsafe-free parser
-module lives in the sys quarantine so internal root preparation consumes its
-opaque result directly; the safe platform facade delegates through a wrapper.
-There is one validator, not separately compiled production copies. File-view
-accessors retain the bundle borrow even after the temporary view is dropped.
+`DoctorOfflineBundle::parse` accepts one [sealed-input snapshot](DOCTOR-SEALED-INPUT-V1.md)
+and an explicit profile selector. It checks that the encoded selector matches
+the argument and the encoded architecture matches the compiled native Linux
+host. The opaque result owns the input and bounded range indexes. Read-only
+file/tool views borrow slices from that input and cannot outlive it. No second
+payload copy or serialized HIR is made. One unsafe-free parser in the sys
+quarantine serves internal root preparation; the safe platform facade wraps it.
+File views keep the bundle borrowed even after a temporary view is dropped.
 
 This is structural admission of untrusted content, not trusted provenance or
 permission to execute. The parser performs no filesystem access, process launch,

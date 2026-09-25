@@ -8,9 +8,9 @@ Audience: compiler contributors, embedding hosts, and agent workflow integrators
 
 `tests/project_graph_operational_git_workflow_v1.rs` connects the real Image
 Workspace Protocol v5 request dispatcher to complete candidate recovery and the
-real `CandidateGitProcessAuthority`. It supplements the existing
-[managed-generation workflow](PROJECT-GRAPH-OPERATIONAL-WORKFLOW-V1.md); it does
-not replace the managed `ACTIVE` authority or rewrite a checked-out source tree.
+real `CandidateGitProcessAuthority`. It adds to the existing [managed-generation workflow](PROJECT-GRAPH-OPERATIONAL-WORKFLOW-V1.md).
+It neither replaces managed `ACTIVE` authority nor rewrites a checked-out
+source tree.
 
 The fixture starts from the three-file calculator Project. It adds a meaningful
 precondition and postcondition plus a local checked caller to `calculator.add`.
@@ -19,9 +19,8 @@ An ordered signature intention moves `right` before `left`, renames them to
 compiler substitutes the body and contracts and migrates the local, application
 and test callers while staging their original arguments in their original
 left-to-right evaluation order. A sibling candidate renames
-`calculator.multiply` to `times` while preserving its declaration ID. Requests
-contain compiler-supported intentions and revision handles, not replacement
-source, paths, Git policy, or approval authority.
+`calculator.multiply` to `times` while preserving its declaration ID. Requests carry compiler-supported intentions and revision handles. They do not
+supply replacement source, paths, Git policy, or approval authority.
 
 Current implementation regression evidence is **HOSTED GREEN** under the
 [v0.4.0 baseline](RELEASE-0.4.0-STATUS.md). The exact-subject local

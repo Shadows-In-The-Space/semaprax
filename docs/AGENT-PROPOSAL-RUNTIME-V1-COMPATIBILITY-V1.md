@@ -2,9 +2,13 @@
 
 Audience: maintainers, runtime integrators, and compiler contributors.
 
-Status: implemented additive AGENT-04 final-message bridge; **HOSTED GREEN** under the
-[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-This does not revise the frozen Runtime v1 schema or API.
+This bridge wraps a checked Proposal document as the message in Runtime v1's
+existing `final` action. Proposal fields remain data: they cannot select a
+tool or change the action kind.
+
+Status: implemented additive AGENT-04 bridge; **HOSTED GREEN** under the
+[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). The frozen Runtime v1
+schema and API do not change.
 
 ## Boundary
 

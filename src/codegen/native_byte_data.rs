@@ -5,10 +5,21 @@
 //! callers remain responsible for readable storage across the admitted range.
 
 pub(super) fn emit_runtime(output: &mut impl super::COutput) {
-    output.push_str(NATIVE_BYTE_DATA_RUNTIME_C);
+    output.push_str(BYTE_DATA_PREFIX_C);
+    output.push_str(BYTE_DATA_ALLOCATORS_C);
+    output.push_str(BYTE_DATA_OPERATIONS_C);
+    output.push_str(BYTE_DATA_DROP_C);
 }
 
-const NATIVE_BYTE_DATA_RUNTIME_C: &str = r#"#include <stddef.h>
+pub(super) fn emit_reserved_runtime(output: &mut impl super::COutput) {
+    output.push_str(BYTE_DATA_PREFIX_C);
+    output.push_str(include_str!("native_byte_data/reserved_allocators.c"));
+    output.push_str("\n");
+    output.push_str(BYTE_DATA_OPERATIONS_C);
+    output.push_str(include_str!("native_byte_data/reserved_drop.c"));
+}
+
+const BYTE_DATA_PREFIX_C: &str = r#"#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -117,7 +128,9 @@ static __attribute__((unused)) void spx_bytes_require_valid(spx_bytes_v1 value) 
     }
 }
 
-static __attribute__((unused)) spx_bytes_v1 spx_bytes_copy(spx_slice_u8_v1 value) {
+"#;
+
+const BYTE_DATA_ALLOCATORS_C: &str = r#"static __attribute__((unused)) spx_bytes_v1 spx_bytes_copy(spx_slice_u8_v1 value) {
     spx_slice_u8_require_owned_view_valid(value);
     if (value.len == UINT64_C(0)) {
         return (spx_bytes_v1){ .ptr = NULL, .len = UINT64_C(0) };
@@ -144,7 +157,9 @@ static __attribute__((unused)) spx_bytes_v1 spx_bytes_zeroed(uint64_t count) {
     return (spx_bytes_v1){ .ptr = payload, .len = count };
 }
 
-/* The element index is any admitted `usize` expression, so the bound is
+"#;
+
+const BYTE_DATA_OPERATIONS_C: &str = r#"/* The element index is any admitted `usize` expression, so the bound is
    checked before the owner transfer commits. A failed store selects the single
    `semaprax.byte-buffer.v1` failure and writes nothing; the buffer is still
    held by its canonical cleanup-plan call-argument slot, which frees it on the
@@ -208,7 +223,9 @@ static __attribute__((unused)) spx_bytes_v1 spx_bytes_move(spx_bytes_v1 *source)
     return moved;
 }
 
-static __attribute__((unused)) void spx_bytes_drop(spx_bytes_v1 *value) {
+"#;
+
+const BYTE_DATA_DROP_C: &str = r#"static __attribute__((unused)) void spx_bytes_drop(spx_bytes_v1 *value) {
     if (value == NULL) {
         spx_runtime_invariant_failure("owned byte drop has a null carrier");
     }
@@ -218,3 +235,38 @@ static __attribute__((unused)) void spx_bytes_drop(spx_bytes_v1 *value) {
     value->len = UINT64_C(0);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest as _, Sha256};
+
+    #[test]
+    fn default_emission_matches_frozen_runtime_bytes() {
+        // The pre-split literal at 69e0b65b, independently hashed before editing.
+        const FROZEN: &str = "f5f05852a39e264dac30ce5d5c37809b35cf6faf18ef610aea84ae92641f334f";
+        let digest = |text: &str| {
+            format!(
+                "{:x}",
+                crate::digest_hex::LowerHex(Sha256::digest(text.as_bytes()))
+            )
+        };
+        let mut emitted = String::new();
+        emit_runtime(&mut emitted);
+        assert_eq!(emitted.len(), 7_489);
+        assert_eq!(digest(&emitted), FROZEN);
+        // The oracle must reject changed emitter order and an omitted fragment,
+        // even though the individual source constants remain unchanged.
+        let reordered = [
+            BYTE_DATA_PREFIX_C,
+            BYTE_DATA_OPERATIONS_C,
+            BYTE_DATA_ALLOCATORS_C,
+            BYTE_DATA_DROP_C,
+        ]
+        .concat();
+        assert_eq!(reordered.len(), emitted.len());
+        assert_ne!(digest(&reordered), FROZEN);
+        let omitted = [BYTE_DATA_PREFIX_C, BYTE_DATA_ALLOCATORS_C, BYTE_DATA_DROP_C].concat();
+        assert_ne!(digest(&omitted), FROZEN);
+    }
+}

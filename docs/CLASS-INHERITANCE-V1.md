@@ -10,9 +10,8 @@ broader product completion remain separately gated.
 
 ## Objective
 
-Badge 3 admitted `class Name { fields, methods }` with static method calls.
-This tranche adds single named inheritance while keeping every other OO
-surface closed:
+Badge 3 admitted classes with fields and static calls. This tranche adds one
+named parent while keeping every other OO surface closed:
 
 ```text
 class Child : Parent { members }     // one named parent, no interfaces

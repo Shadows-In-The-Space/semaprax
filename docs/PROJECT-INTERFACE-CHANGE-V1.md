@@ -12,9 +12,9 @@ Audience: agent builders, compiler contributors, and reviewers.
 explicit Project record to an explicit Project protocol's complete member table.
 The binding names existing Project functions by persistent identity. The
 declaration defaults to the receiver module; optional `destination` selects one
-other exact declared Project module. The compiler plans canonical dependency
-imports before mutation. Source and Project checkers validate the closed static
-sidecar before candidate application rebuilds the full Project. This does not
+other exact declared Project module. Before mutation, the compiler plans canonical dependency imports. Source and
+Project checkers validate the closed static sidecar, then candidate application
+rebuilds the full Project. This does not
 generate function bodies, lower dynamic dispatch, introduce a runtime witness
 table, or add a runtime Graph edge for the protocol dependency.
 
@@ -49,8 +49,8 @@ cannot use the `auto:` or `semaprax.` prefixes or collide with prelude identitie
 Project revision. It lists Project protocols and provider modules, required
 signatures and modes, eligible Project function IDs, declared destination
 modules, and an existing implementation if present.
-`complete_mapping_available` requires an actual one-to-one matching, not merely
-one candidate per member. The ordinary change catalogue advertises
+`complete_mapping_available` requires a one-to-one match. Finding a candidate
+for each member is not enough if those choices cannot form that mapping. The ordinary change catalogue advertises
 `implement_interface` when a complete new mapping is available. Discovery never
 admits a proposed implementation or selects a preferred table automatically.
 

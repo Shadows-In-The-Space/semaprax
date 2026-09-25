@@ -1,20 +1,21 @@
 # Agent Payment Harness v1
 
-Status: implemented bounded injected-host harness; **HOSTED GREEN** under the
-[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
-No live payment, wallet, signing, public API or production-payment support is implied.
+Audience: compiler, runtime, and economic-host contributors.
 
-Audience: compiler contributors, Agent Runtime integrators, and Economic Agent
-host authors.
+This harness connects a checked Agent, an economic policy, and two injected
+hosts to produce a bounded payment-intent workflow. It does not provide live
+payments, a wallet, signing, a public API, or production-payment support.
+
+Status: implemented injected-host harness; **HOSTED GREEN** under the
+[v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 
 ## Purpose
 
-Agent Payment Harness v1 closes the local construction gap between the
-canonical [Language-Native Agent Object v1](LANGUAGE-NATIVE-AGENT-OBJECT-V1.md)
-compiler, Agent Runtime v1, and [Economic Agent v1](ECONOMIC-AGENT-V1.md).
-One compiler-owned object binds an exact AgentDefinition, its derived
+One compiler-owned object binds an exact AgentDefinition from
+[Language-Native Agent Object v1](LANGUAGE-NATIVE-AGENT-OBJECT-V1.md), its derived
 AgentGraph, and one independently admitted Economic Agent Policy. A caller can
-instantiate that object with two disjoint hosts and run the complete handoff:
+run it through Agent Runtime v1 and [Economic Agent v1](ECONOMIC-AGENT-V1.md)
+with two disjoint injected hosts:
 
 ```text
 AgentDefinition v1 --compile/replay--> AgentGraph v1

@@ -6,11 +6,10 @@ Status: reviewed local execution passed at exact subject
 
 Audience: release engineers, compiler contributors, and programme reviewers.
 
-V2 replaces the runner's v1 output for new executions while preserving every
-archived v1 bundle as historical evidence for its exact subject. It adds actual
-Rust and provisioned TypeScript request construction and compiler admission to
-the existing generated-source, Python request, three-language response, MCP
-adapter, and real stdio child gates.
+New runs produce v2 output; archived v1 bundles remain evidence only for their
+original subjects. V2 adds real Rust and provisioned TypeScript request
+construction and compiler admission to the existing generated-source, Python
+request, three-language response, MCP adapter, and real stdio child gates.
 
 The runner remains:
 

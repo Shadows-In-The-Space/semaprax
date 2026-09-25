@@ -6,6 +6,12 @@ Audience: maintainers, contributors, documentation readers and coding agents.
 
 Audit date: 2026-09-10.
 
+Read this as a dated audit of v0.4.0, not a review of today's documentation.
+It preserves the file inventory and evidence from that snapshot; newer pages
+and code need their own checks. The current [changelog archive page](CHANGELOG-ARCHIVE.md)
+is a short index; its original bytes remain at the immutable Git snapshot
+linked there. The dated audit's preservation claim refers to its own snapshot.
+
 ## Scope and authoritative subject
 
 The audit accounts for **all 485 pre-existing tracked files under `docs/`**:
@@ -21,14 +27,14 @@ The implementation subject remains release `v0.4.0`, commit
 `dfc15e2ddc818fa97744b5a9d69fd6108dd6a321`. The
 [release baseline](RELEASE-0.4.0-STATUS.md) records the maintainer-accepted
 **HOSTED GREEN** classification. The release-note publication problem is not
-an outstanding implementation or conformance task. A documentation update does
-not create a new compiler version or provide evidence for later code changes.
+an outstanding implementation or conformance task. Updating documentation does not create a compiler version or supply evidence
+for later code changes.
 
-Concurrent documentation changes were reconciled rather than discarded. In
-particular, current Status/Audience metadata and the already-pushed Agent,
-generic, collection, library/I/O and roadmap corrections are retained or
-refined within the same release scope. The audit does not change application
-code, tests, executable examples, frozen protocol formats or target admission.
+The audit reconciled concurrent documentation changes. It retained or refined
+current Status/Audience metadata and the already-pushed Agent, generic,
+collection, library/I/O and roadmap corrections within the same release scope.
+It changes no application code, tests, executable examples, frozen protocol
+formats or target admission.
 
 ## Corrections closed
 

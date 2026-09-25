@@ -6,13 +6,11 @@ Status: implemented bounded reference protocol; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). This read-only protocol does
 not promote a target, grant authority, or complete the graph-operational programme.
 
-An immutable semantic image can export a small, self-authenticating reference
-to one retained source function and later resolve that reference against an
-independently rebuilt copy of the exact same image. This supplies the stable
-session handoff absent from revision-bound facet handles alone. Canonical `.spx`
-remains the only repository authority; a reference neither contains program
-meaning nor permits a source, build, execution, test, candidate, or publication
-operation.
+Export a small reference to one retained source function, then resolve it
+against an independently rebuilt copy of the same immutable image. Unlike a
+revision-bound facet handle, this supports a session handoff. The reference
+contains no program meaning and grants no source, build, execution, test,
+candidate, or publication authority; canonical `.spx` remains authoritative.
 
 ## Library contract
 

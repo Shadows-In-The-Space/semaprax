@@ -12,11 +12,11 @@ Schema `semaprax.hygienic-gen.v1` and diagnostic family `SPX-Y` remain unchanged
 semaprax hygienic-gen <file> [--templates default-constructor,field-accessors] [--max-bytes N]
 ```
 
-The library entry point is `hygienic::generate(&path, &options)`. Options are
-validated before any work: the template selection must be non-empty,
-duplicate-free, and drawn only from the closed registry; `max_bytes` must lie
-in the shared agent-context bounds (`SPX-Y100` otherwise). The default
-selection is the full registry and the default budget is 65536 bytes.
+Call `hygienic::generate(&path, &options)` from the library. It validates options
+before doing any work: select at least one template, use only the closed registry,
+and include no duplicates. `max_bytes` must be within the shared agent-context
+bounds; otherwise the call returns `SPX-Y100`. Defaults select the full registry
+with a 65536-byte budget.
 
 ## Model
 
@@ -76,12 +76,11 @@ canonical formatter output of the generated function, and an `ast` summary),
 (base/combined Graph schema and revision, function-node delta), `truncation`,
 and fixed-order `nonclaims`.
 
-Byte-budget truncation drops generated entries from the canonical tail while
-preserving prefix order, records `byte_budget` in `truncation.reasons`, and
-keeps the JSON valid. If even the zero-entry envelope cannot fit, generation
-fails closed with `SPX-Y105`. The bounded-output accounting charges nested
-strings conservatively, so the emitted envelope is always within the
-requested budget.
+When output exceeds the byte budget, generation removes entries from the
+canonical tail without reordering the remaining prefix. It records
+`byte_budget` in `truncation.reasons` and keeps the JSON valid. If even an empty
+envelope cannot fit, it fails closed with `SPX-Y105`. Conservative accounting
+for nested strings keeps the emitted envelope within the requested budget.
 
 ## Nonclaims
 

@@ -10,19 +10,18 @@ remains unsupported and unpublished.
 
 Audience: ownership, cleanup, backend, and ABI reviewers.
 
+In plain terms: this describes how a future consumer must clean up owned values, without creating that consumer yet.
+
 ## What this settles
 
-A consumer that receives an owned generic instance has to know three things,
-and none of them may be a boundary's invention:
+A consumer of an owned generic instance needs three compiler-derived facts:
 
 1. which owned leaves it is accountable for, and in which order;
 2. how each one is discharged; and
 3. what happens to the ones already taken when a transfer fails part way.
 
-The compiler already proves all three for the internal path. This module
-derives those facts as a target-neutral plan and *binds* them to the checked
-cleanup facts, so a future boundary cannot quietly diverge from the ownership
-the compiler verified.
+This module turns those checked facts into a target-neutral plan and binds the
+plan back to them, so a future boundary cannot quietly change cleanup behavior.
 
 | Layer | Identifier |
 | --- | --- |

@@ -6,12 +6,10 @@ Lifecycle v1 bridge; **HOSTED GREEN** under the
 
 Audience: compiler contributors, semantic-workspace integrators, and reviewers.
 
-The lowering consumes the closed `.spx` `AgentDeclaration` AST produced by the
-frontend. It does not define another Agent artifact. Instead it renders the
-exact existing `semaprax.agent-definition.v1` canonical JSON and immediately
-re-admits those bytes through `compile_agent_definition`. The resulting
-AgentDefinition v1, AgentGraph v1, and Runtime Profile v1 are therefore the
-existing compiler products, not similar replacements.
+Lowering consumes the frontend's closed `.spx` `AgentDeclaration` AST. It
+renders the existing `semaprax.agent-definition.v1` JSON and immediately
+re-admits it through `compile_agent_definition`, so AgentDefinition v1,
+AgentGraph v1, and Runtime Profile v1 remain the compiler's existing products.
 
 Each Agent must contain exactly the six type roles in order:
 `task`, `state`, `observation`, `proposal`, `outcome`, `result`. It must contain

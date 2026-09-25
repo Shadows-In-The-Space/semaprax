@@ -14,12 +14,10 @@ implementation, and anyone extending this corpus later.
 
 ## Why this exists, and what "done" means for this issue
 
-SPX-AI-018 (GitHub issue #117) asks for one finite application that "drives
-language composition" — real JSON parsing, real text handling, real bounded
-I/O and an optional provider effect — frozen *before* any compiler or
-standard-library change is made to pass it, plus an oracle independent
-enough that a Semaprax implementation cannot pass by accident or by copying
-the oracle's own logic. This issue is scoped to exactly that: the contract
+SPX-AI-018 (issue #117) asks for one finite application with JSON, text,
+bounded I/O, and optional provider effects, frozen *before* compiler or library
+changes try to satisfy it. Its independent oracle prevents passing by accident
+or by copying oracle logic. This issue supplies that contract.
 and the oracle. It is explicitly **not** the Semaprax implementation
 (non-goal, stated in the issue body), and it is explicitly not an expansion
 of the standard library's public support surface — it is an acceptance

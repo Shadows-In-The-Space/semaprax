@@ -4,12 +4,11 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-`semaprax properties <file.spx>` is a deterministic, read-only analysis that
-generates bounded test inputs from admitted function signatures and evaluates
-the authored `requires`/`ensures` contracts against them. It is the first
-executable tranche of the roadmap item "Property tests generated from types
-and contracts". It runs no target, executes no generated backend, and changes
-no source.
+`semaprax properties <file.spx>` derives bounded inputs from admitted function
+signatures and evaluates their authored `requires` and `ensures` contracts.
+This deterministic read-only analysis is the first executable part of the
+"Property tests generated from types and contracts" roadmap item. It runs no
+target or generated backend and changes no source.
 
 ## Command
 

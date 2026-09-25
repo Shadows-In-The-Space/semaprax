@@ -16,15 +16,13 @@ operation, or a new effect. See [Non-claims](#non-claims-and-remaining-work).
 
 [Bounded Language Network I/O v1](BOUNDED-LANGUAGE-NETWORK-IO-V1.md) and
 [HTTP Application Routing v1](HTTP-APPLICATION-ROUTING-V1.md) established the
-pattern this tranche follows: give checked SEMAPRAX code a typed, bounded way
-to reason about a domain (bytes on a socket, an HTTP route) without adding
-ambient authority, and let the pure standard-library layer execute on every
-backend while the host-authority layer stays behind an explicit, injected
-provider. A database client is exactly where the capability invariant in
-`AGENTS.md` gets violated first — an ambient connection string, a query built
-by string concatenation, a transaction whose outcome is guessed after a
-dropped socket — so this tranche specifies the semantics precisely before any
-byte reaches a driver.
+pattern used here: checked SEMAPRAX code reasons about a domain through typed,
+bounded operations without ambient authority. Pure standard-library code runs
+on every backend; host authority requires an explicit injected provider.
+Database access needs that separation: ambient connection strings, concatenated
+queries and guessed transaction outcomes after a dropped socket can violate
+the capability invariant in `AGENTS.md`. This profile defines the semantics
+before sending bytes to a driver.
 
 `std.db` models four things as closed, checked, deterministic computations:
 
@@ -49,10 +47,9 @@ byte reaches a driver.
    out-of-order attempts, and a concurrent runner's duplicate attempt are each
    one checked predicate over the ledger and the candidate migration.
 
-Everything above is scalar arithmetic and byte comparison. None of it opens a
-socket, reads a file, or reads an environment variable, so none of it needs an
-effect, a `permit`, or a provider; the profile is `scalar` like `std.core` and
-`std.num`.
+These operations use only scalar arithmetic and byte comparison. They open no
+sockets, read no files or environment variables, and need no effect, `permit`
+or provider. The profile is `scalar`, like `std.core` and `std.num`.
 
 ## Type tags
 

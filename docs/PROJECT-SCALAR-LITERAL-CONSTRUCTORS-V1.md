@@ -31,17 +31,17 @@ number precision, host float parsing, source escapes or surrogate handling:
 
 `scalar` is exactly eight lowercase hexadecimal digits. Its decoded `u32` must
 be one Unicode scalar value, so surrogate code points and values above
-`0010ffff` reject. The spelling is a numeric transport encoding, not source
-text or a JSON character. Canonical source formatting owns escaping NUL,
-controls, quotes, backslashes and non-ASCII values; reparsing must recover the
-same scalar without normalization.
+`0010ffff` reject. The spelling encodes a number for transport; it is not source text or a JSON
+character. Canonical source formatting escapes NUL, controls, quotes,
+backslashes and non-ASCII values. Reparsing must recover the same scalar without
+normalization.
 
 `f32.bits` and `f64.bits` are exactly eight and sixteen lowercase hexadecimal
 digits respectively and carry the complete IEEE-754 representation. Only
 finite values are constructible. Positive and negative zero, subnormals,
 ordinary finite values and the maximum finite magnitudes are admitted; every
-infinity and NaN encoding rejects. Source syntax cannot represent nonfinite
-values as literals, so admitting them would violate canonical source replay.
+infinity and NaN encoding rejects. Nonfinite values cannot be written as source literals. Accepting them here
+would break canonical source replay.
 
 Source parses a leading minus as unary negation rather than part of a float
 literal. A sign-bit-set finite request therefore lowers to the existing unary

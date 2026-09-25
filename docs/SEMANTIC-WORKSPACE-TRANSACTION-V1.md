@@ -4,14 +4,12 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: workspace tool authors and compiler contributors.
 
-Semantic Workspace Transaction v1 is a bounded multi-file publication
-protocol for cooperating SEMAPRAX readers and writers. It manages immutable
-source generations under one authenticated workspace control directory and
-publishes one complete generation by replacing only the canonical `ACTIVE`
-pointer. It is a real 2–16-file transaction for the admitted per-file Semantic
-Patch v1/v2 operations and the sole canonical Patch v3 operation. It is not a
-raw working-tree transaction, a repository graph, or general cross-file
-semantics.
+Workspace Transaction v1 lets cooperating readers and writers publish one
+complete immutable source generation by replacing the canonical `ACTIVE`
+pointer under an authenticated control directory. It covers 2–16 managed
+files and admitted per-file Patch v1/v2 operations plus the sole canonical
+Patch v3 operation. It is not a raw working-tree transaction, repository
+graph, or general cross-file semantic engine.
 
 The architectural decision and rejected sequential-rename model are recorded
 in [ADR 0002](decisions/0002-managed-workspace-generations.md).

@@ -15,9 +15,9 @@ unchanged read-only v2 inspection surface:
 - `project/api-describe`
 - `project/npm-build-inline`
 
-The startup flag is mutually exclusive with `--allow-project-rename` and
-`--allow-project-workflow`, and startup rejects any non-v8/non-owned-data
-subject before a protocol response. Default v2 and opt-in v3/v4 retain their existing
+The startup flag cannot be combined with `--allow-project-rename` or
+`--allow-project-workflow`. Startup rejects any subject outside v8 owned-data
+before sending a protocol response. Default v2 and opt-in v3/v4 retain their existing
 schemas, method inventories, request grammar, response bytes, and authority.
 V5 reports neither the v3 rename methods nor the v4 change/build methods.
 
@@ -25,9 +25,8 @@ V5 reports neither the v3 rename methods nor the v4 change/build methods.
 
 Both v5 methods are admitted only in `open` state and require the exact
 `project_revision` and `workspace_revision` returned by `workspace/open`.
-Missing, stale, foreign, or surplus revision facts reject. Every request uses
-the common pre-render and post-render held-input authentication; observed drift
-is absorbing and prevents the response payload from being written.
+Missing, stale, foreign, or surplus revision facts reject. Every request authenticates held inputs before and after rendering. Once drift
+is observed, the session cannot recover and the response payload is not written.
 
 The common NDJSON and JSON-RPC grammar remains closed. Notifications do not
 execute either v5 semantic method. The configured response budget includes the

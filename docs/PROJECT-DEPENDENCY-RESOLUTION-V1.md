@@ -14,9 +14,8 @@ authors, and compiler contributors.
 content-addressed cache of Semantic Package Subject-v3 envelopes, deterministically
 selects one version per package that satisfies the manifest's ranges and their
 transitive requirements, and prints the resolver's evidence, which embeds an
-[Offline Semantic Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md). Reading the
-cache is the explicit effect of this command; `check`, `build`, `run`, and
-`test` never touch it. A scalar project can vendor the selected complete
+[Offline Semantic Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md). Reading the cache is an explicit effect of `resolve`; `check`, `build`, `run`,
+and `test` never touch it. A scalar project can vendor the selected complete
 Subject-v3 closure under `[dependency-sources]`; ordinary Project routes then
 independently replay and resolve those exact held files as specified by
 [Project Dependencies v1](PROJECT-DEPENDENCIES-V1.md).
@@ -27,12 +26,11 @@ independently replay and resolve those exact held files as specified by
 semaprax resolve <manifest> --target <native64|wasm32> --cache <dir> [--write|--verify] [--max-bytes N]
 ```
 
-`resolve` parses the manifest (it does not build the project, so it resolves a
-manifest whose `[dependencies]` a build would reject), takes its `[dependencies]`
-as the root requirements, its `[capabilities]` as the allowed capabilities, and
-the given `--target`, then loads the cache and runs the resolver. The evidence
-is printed to stdout. Resolution is per target: a project with both targets in
-its matrix is resolved once per target.
+`resolve` parses the manifest without building the project, so it can resolve
+`[dependencies]` that a build would reject. It uses those dependencies as root
+requirements, `[capabilities]` as the allowed capabilities, and the selected
+`--target`. It then loads the cache, runs the resolver, and prints evidence to
+stdout. Resolve each target separately when the project's matrix contains both.
 
 The manifest `[dependencies]` supply 1 to 4 roots; a manifest that declares
 none has nothing to resolve. `--target` must be `native64` or `wasm32`, and

@@ -11,9 +11,9 @@ and workflow reviewers.
 
 ## Purpose
 
-The v5 image protocol keeps the ordinary JSON-RPC error `code` and `message`.
-When an admitted method reaches compiler application logic and returns one or
-more SEMAPRAX diagnostics, the error also carries a closed `data` value:
+V5 keeps the JSON-RPC error `code` and `message`. If an admitted method returns
+SEMAPRAX diagnostics from compiler application logic, the error also includes
+this closed `data` value:
 
 ```json
 {

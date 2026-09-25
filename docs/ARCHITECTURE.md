@@ -4,19 +4,27 @@ Status: living internal implementation and trust-boundary map.
 
 Audience: compiler contributors and reviewers.
 
-This document owns the current implementation map, data flow, and trust
-boundaries. It does not own product status, protocol details, historical
-changes, or test inventories:
+Use this page to find the code that owns a behavior and to see where trust
+checks happen. It is a contributor map, not a feature catalogue. For other
+questions, start here:
 
 - current status: [completion matrix](COMPLETION-MATRIX.md);
 - exact protocols and ABIs: their versioned reference documents;
 - required checks: [quality gates](QUALITY-GATES.md);
 - history: [changelog](https://github.com/wavect/semaprax/blob/main/CHANGELOG.md).
 
-SEMAPRAX v0.4 is a set of bounded vertical slices through a larger language
-design (v0.2 remains the first archived tag milestone). The architecture keeps
-human source, verified meaning, agent projections, mutation authority, and
-target execution distinct.
+The key rule is separation: readable source, checked meaning, agent reports,
+write authority, and target execution are different things. Passing data
+between them does not automatically transfer authority.
+
+For a first read, follow [System shape](#system-shape),
+[Representations](#representations), and
+[Trust boundaries](#trust-boundaries-and-invariants). If you are changing code,
+jump to the [repository map](#repository-map),
+[module-size rule](#module-size), or
+[integration-test harnesses](#integration-test-harnesses). The detailed owner
+notes below are for locating an implementation, not a prerequisite for writing
+your first program.
 
 `src/workflow_profile.rs` and its `enabled` submodule own the optional
 [current-thread workflow observer](WORKFLOW-PROFILING-V1.md). Instrumentation
@@ -48,9 +56,10 @@ canonical .spx source or held Project inputs
  evidence + transactions      Clang       JS/Node host
 ```
 
-No backend bypasses source verification or validated-HIR checks. Cleanup-plan
-vectors are canonical execution order and must not be sorted or repaired by a
-graph projection or backend.
+Every backend passes source verification and validated HIR. Cleanup-plan vectors
+are canonical runtime order; projections and backends must never sort or repair them.
+
+### Agent and generic owners
 
 The additive `agent_lifecycle/iterative` module owns checked Step transitions,
 per-turn authorization, bounded stage execution, and iterative evidence. Its
@@ -95,12 +104,10 @@ separate admission boundary.
 
 ## Representations
 
-The registry compiler and unpublished full toolchain share one compiler library
-and `src/cli_driver.rs`. The root retains dispatch;
-`src/cli_driver/options.rs` owns command-specific bounded option parsing,
-`src/cli_driver/report_options.rs` owns report and analysis option parsing, and
-`src/cli_driver/source_execution.rs` owns single-file build, run, and diagnostic
-publication.
+The registry compiler and unpublished toolchain share one compiler library and
+`src/cli_driver.rs`. The root dispatches; `options.rs` parses bounded command
+options, `report_options.rs` parses report/analysis options, and
+`source_execution.rs` owns single-file build, run, and diagnostics.
 The standalone binary supplies no private-host hooks.
 The private `source_live_cli` host supplies the versioned durable source CLI,
 held-directory checkpoint store and restart-stable clock. It derives bindings
@@ -720,10 +727,9 @@ publication authority. See [Target Evidence v1](SEMANTIC-TARGET-EVIDENCE-V1.md).
 
 ### Interpreter
 
-`src/interpreter.rs` evaluates an admitted verified-HIR profile with bounded
-fuel and normalized runtime statuses. `src/hosted_interpreter.rs` adds the
-bounded host-facing execution used by Project profiles. The interpreter is a
-development and conformance lane, not a target backend or proof engine.
+`src/interpreter.rs` evaluates admitted verified HIR with bounded fuel and
+normalized statuses. `src/hosted_interpreter.rs` adds Project-facing execution.
+This is a development/conformance lane, not a target backend or proof engine.
 
 `src/interpreter/internal_strings.rs` owns the additive `interpret-strings`
 facade and strict report boundary. A private profile selects internal String
@@ -733,10 +739,9 @@ results stay unchanged; ordinary, Project, prepared, and effectful evaluators
 retain their prior admission. This route adds no second execution engine or
 target runtime. See [Internal String Interpreter v1](INTERPRETER-INTERNAL-STRINGS-V1.md).
 
-`src/interpreter/prepared.rs` owns the additive cached closure/index types,
-cooperative cancellation seam, prepared evaluation entry, and expression-trace
-traversal hook. The root interpreter retains the shared evaluator and only the
-minimal crate-private reexports needed by the Project lane.
+`src/interpreter/prepared.rs` owns cached closure/index state, cooperative
+cancellation, prepared evaluation, and trace traversal. The root interpreter
+keeps the shared evaluator and only minimal Project-lane reexports.
 
 `src/interpreter/retained_call/execution.rs` shares retained-call staging,
 evaluation and harvesting between the existing worker API and the sealed
@@ -972,10 +977,9 @@ publication occurs only after postconditions and non-result cleanup.
 
 ### Single-file queries and changes
 
-`src/agent_transport.rs` serves a bounded JSON-RPC loop over one checked
-program. `src/patch.rs` owns the supported single-file transaction format and
-A0 commit boundary. `src/repair.rs`, `src/impact.rs`, and `src/review.rs` are
-read-only planners and projections.
+`src/agent_transport.rs` serves bounded JSON-RPC over one checked program.
+`src/patch.rs` owns single-file transactions and A0; `repair.rs`, `impact.rs`,
+and `review.rs` are read-only planners/projections.
 
 `src/patch_evidence.rs` independently reconstructs supported evidence. The
 evidence-gated apply route acquires ordinary A0 authority first, replays before
@@ -984,9 +988,8 @@ remains a separate legacy route.
 
 ### Managed workspace
 
-`src/workspace.rs` owns immutable generations and the authenticated `ACTIVE`
-pivot. `src/workspace_patch_evidence.rs` binds exact per-file child evidence
-and replays it before candidate creation.
+`src/workspace.rs` owns immutable generations and authenticated `ACTIVE`.
+`workspace_patch_evidence.rs` binds and replays exact child evidence before a candidate.
 
 `src/semantic_workspace.rs`, `src/workspace_graph.rs`, and
 `src/workspace_analysis.rs` own cross-file initialization, graph construction,
@@ -996,8 +999,8 @@ change are separate, bounded derivation layers in
 `src/semantic_workspace_operations.rs` and
 `src/semantic_workspace_structural_change.rs`.
 
-Only the live workspace invocation owns the final publication pivot. Evidence
-capsules never carry reusable authority.
+Only the live workspace invocation may publish. Evidence capsules never carry
+reusable authority.
 
 ### Operational semantic images
 
@@ -2334,33 +2337,26 @@ tool-provenance, registry, or hosted-client authority claim.
 
 ## Reports and projections
 
-Read-only commands are implemented in focused modules such as
+Read-only commands live in focused modules such as
 `src/abi_report.rs`, `src/c_header.rs`, `src/cxx_shim.rs` and its bounded
 `src/cxx_shim/package.rs` replay/package child,
 `src/capability_manifest.rs`, `src/freestanding_object.rs`, `src/openapi.rs`,
 `src/package_report.rs`, `src/plugin_manifest.rs`, `src/region_report.rs`,
 `src/simd_report.rs`, and `src/ui_schema.rs`.
 
-`src/doc.rs` is the documentation projection. It builds one model of a checked
-module's declarations from the parsed program and its comments (identities,
-canonical signatures without bodies, ownership modes, effects, contracts,
-members, and leading-comment descriptions) and renders it as Markdown or as a
-one-line `semaprax.doc.v1` document, both carrying `graph::revision`. It
-reuses the canonical formatter's type, contract, and escaping writers, so a
-signature is the formatter's text. `src/cli/doc.rs` owns the closed
-`doc <file> [--json]` grammar and verifies before rendering. The projections
-harness proves that every documented identity of a graph-carried kind is a
-node of `semaprax graph` at the same revision. See
+`src/doc.rs` projects checked declarations and comments—identity, signature,
+ownership, effects, contracts, members, descriptions—to Markdown or one-line
+`semaprax.doc.v1`, both with `graph::revision`. It reuses formatter writers, so
+signatures match canonical formatting. `src/cli/doc.rs` verifies before its
+closed `doc <file> [--json]` render. The harness ensures each documented graph
+identity is a `semaprax graph` node at that revision. See
 [Documentation Projection v1](DOC-PROJECTION-V1.md).
 
-`src/query.rs` is the declaration query: it filters the documentation model of
-`src/doc.rs` by kind, name, identity prefix, and effect. Single-module queries
-join `src/call_index.rs`; Project queries parse each retained authenticated
-source for presentation facts and join the call edges of that same revision's
-retained semantic graph. Project matches therefore include path/module/source
-identity and cross-file callers without accepting an arbitrary library file as
-a standalone executable. `src/cli/query.rs` owns input selection and the closed
-grammar; `src/cli/package.rs`
+`src/query.rs` filters the documentation model by kind, name, ID prefix, and
+effect. Single modules join `call_index.rs`; Projects join retained source facts
+and graph calls from the same revision. Results include path/module/source and
+cross-file callers without treating a library as standalone. `src/cli/query.rs`
+owns selection/grammar; `src/cli/package.rs`
 rewrites `package report|lock|resolve` to the long-form routes and re-enters
 the dispatcher. See [Unified CLI v1](UNIFIED-CLI-V1.md).
 
@@ -2404,7 +2400,8 @@ into the resolver's content-addressed cache by its own digest; it decides every
 address before writing any, and `resolve` remains the cache's only reader. See
 [Unified CLI v1](UNIFIED-CLI-V1.md).
 
-`src/cli/fetch/locked.rs` owns the additive `fetch --lock` host boundary:
+`package_cache_host` owns the additive `fetch --lock` host boundary;
+`src/cli/fetch/locked.rs` is its byte-compatible CLI adapter:
 held nofollow ancestor/input handles, cooperative authority before exact lock
 replay, fd-relative directory creation, all-subject staging, no-replace
 publication and receipt rechecks. It never rolls back by pathname; retained
@@ -2412,6 +2409,10 @@ stages require explicit reconciliation and a failed publication may leave an
 authenticated prefix. Unsupported hosts fail before effects. Same-principal
 uncooperative mutation remains excluded by the host, not defeated by an
 advisory lock. The versioned CLI contract owns the exact supported scope.
+The original hostile transaction regressions live in `package_cache_host/tests`.
+The same held writer serves the explicit signed-store resolver-cache bridge;
+source generation authority is rechecked during staging/publication, with no
+multi-store atomicity or persistent trust inherited by copied subjects.
 
 `src/cli/verify.rs` is the schema-selected front over the independent
 verifiers: it reads a capsule's top-level `schema` once, selects the verifier
@@ -2478,14 +2479,92 @@ publication surfaces and gain no registry, network, acquisition, cache, build,
 execution, or publication authority. See [Lock v3](OFFLINE-SEMANTIC-PACKAGE-LOCK-V3.md)
 and [Resolver v2](OFFLINE-PACKAGE-RESOLVER-V2.md).
 
+`package_registry::leaf_manifest_v1` owns dependency-free Build-v1 producer
+admission and exact Subject-v3/Subject-v2 source/report association, separately
+from byte-only inspection. `package_registry::registry_v3` composes admitted
+leaves with existing linked-build roots, retains independently verified
+source/dependency facts, and checks complete Lock-v3 selections against that
+exact compiled closure. Its sealed snapshots cannot be constructed from decoded
+inspection data. Both modules are pure and preserve registry-v1/v2 and the
+existing build/capsule profiles. Managed-host v3 integration remains separate.
+See [Leaf Manifest v1](PACKAGE-LEAF-ARTIFACT-MANIFEST-V1.md) and
+[Registry Snapshot v3](PACKAGE-REGISTRY-SNAPSHOT-V3.md).
+
 `package_registry::trust` adds a pure TUF-style local trust boundary above
 registry-v2 independently admitted entries. It verifies disjoint Ed25519
 root/timestamp/snapshot/publisher thresholds, namespace and exact manifest
 bindings, root rotation and caller-supplied checkpoint/time consistency.
-It returns only a non-authoritative candidate and required checkpoint
-transition, never cache/fetch authority. The future host owns durable root and
-checkpoint storage and its recovery relationship with cache publication;
-[Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns that boundary.
+Its verifier returns only a non-authoritative candidate. The separate
+`package_registry::trust::host` owns an explicit owner-private held directory
+and cooperative lock, independently pinned bootstrap root, immutable
+root/checkpoint/selected-artifact generations, one `ACTIVE` pivot, and exact
+revalidation after ambiguous effects. A host receipt is evidence, not a
+fetch/read capability. This managed store is separate from the existing flat
+offline `fetch --lock` cache; neither route gains online registry authority,
+and no physical power-loss or hostile same-principal storage guarantee follows.
+[Registry Trust v1](PACKAGE-REGISTRY-TRUST-V1.md) owns these boundaries.
+
+`package_registry::trust::registry_v3` separately owns signed metadata-v2 proof
+over a borrowed producer-backed Registry-v3, exact leaf/linked manifest targets,
+Lock-v3 compiled-closure checks, and a one-way Checkpoint-v2 protocol floor.
+It shares root/threshold authentication but returns only a non-authoritative
+candidate; the v1 managed host and CLI do not consume it. See
+[Registry Trust v2](PACKAGE-REGISTRY-TRUST-V2.md).
+
+`package_registry::trust::host::registry_v3` owns additive generation-v2 durable
+commit/recovery and explicit one-way v1 migration, plus an additive
+generation-v3 mirror timestamp anchor for the local mirror-refresh route. It
+requires complete Lock-v3 selection and one exact core Wasm artifact per
+selected root/leaf coordinate. Its `generation` child owns canonical wire and
+lineage; `store` owns held CAS, commit and exact recovery. The existing Unix
+effect primitive is shared through a predecessor-decoding callback; ordinary
+v1 bytes/routes and historical v2 reads remain unchanged. Receipts grant no
+fetch/read/execution capability. See
+[Registry Host v2](PACKAGE-REGISTRY-HOST-V2.md).
+
+Its `read` child owns explicit offline artifact consumption through the live
+held store: exact generation/Lock-v3 pin, independently sealed Registry-v3,
+current signed-metadata freshness and manifest-bound bytes, with a final ACTIVE
+recheck before returning immutable payload/evidence. No receipt becomes a
+serializable bearer token or arbitrary filesystem/execution authority.
+
+Its `cache` child bridges complete signed-store reads to that shared cache
+writer. Every locked core artifact is freshly checked before the first cache
+write; only exact Subject-v3 bytes are copied. The real Resolver-v2 consumes
+that flat cache to reproduce the selected Lock-v3, while artifacts stay in the
+managed store. See [Registry Cache Bridge v1](PACKAGE-REGISTRY-CACHE-BRIDGE-V1.md).
+
+`package_registry::mirror_transport` is a distinct native host acquisition
+boundary. A host supplies one HTTPS origin, timeout and exact immutable
+metadata/artifact paths with raw SHA-256 bindings; the module disables ambient
+proxies, credentials, redirects and retries, bounds every response, and returns
+only matching bytes. Those bytes remain untrusted until separately passed to
+the Registry-v3 signed proof and held-host update APIs; mirror acquisition has
+no root/store/cache/resolver/execution authority and establishes no hosted
+availability. See [Package registry mirror transport v1](PACKAGE-REGISTRY-MIRROR-TRANSPORT-V1.md).
+
+`trust::registry_v3::verify_mirror_update` separately binds one exact acquired
+metadata-path set back into the existing signed Registry-v3 proof. It retains
+independent root/bridge-checkpoint/time and producer-sealed registry requirements,
+replays signed timestamp/snapshot/publisher-manifest associations, and applies
+a seven-day maximum interval after a checkpointed timestamp before accepting
+another offline mirror update. It returns the existing non-authoritative
+candidate only; durable Host v2 commit remains required. See [Package registry
+mirror trust v1](PACKAGE-REGISTRY-MIRROR-TRUST-V1.md).
+
+`trust::host::registry_v3::acquire_commit_and_read` is a native local
+composition layer that borrows the preceding mirror authority, sealed registry,
+fixed times and existing held store. It derives the root and bridge checkpoint
+from the live held generation—not caller state—then proves acquired metadata
+and lock/manifest-bound artifacts before the Host-v3 mirror commit and one live
+generation/Lock-v3 artifact read. The immutable pivot carries an authenticated
+timestamp version/digest/first-observation anchor; replay preserves it and only
+a newer signed timestamp moves it. A v2 generation without that anchor may
+start this route only at the original bootstrap generation. A post-commit read
+failure carries receipt and next bridge evidence distinctly. The result
+confers no resolver cache, root, filesystem, execution or hosted-availability
+authority. See
+[Package registry mirror flow v1](PACKAGE-REGISTRY-MIRROR-FLOW-V1.md).
 
 Additive `package_source_capsule` consumes exact Resolver-v1 replay and two
 through four caller-owned canonical implementation sources. The ordinary
@@ -2566,8 +2645,7 @@ the runtime or ecosystem feature it describes.
 
 ## Private host and proof boundaries
 
-The following areas are deliberately quarantined from the public compiler
-contract:
+These areas are deliberately outside the public compiler contract:
 
 - `crates/semaprax-native-loader`: unsafe dynamic-loader boundary;
 - `crates/semaprax-native-host`: connected callable and settlement host;
@@ -2594,7 +2672,7 @@ contract:
 - `platform-tests/`: installed application and runtime fixtures whose claims
   count only when the owning hosted jobs are green.
 
-Private or proof-only evidence may validate a design boundary without creating
+Private or proof-only evidence can validate a design boundary without creating
 a supported language, CLI, ABI, or runtime surface.
 
 ## Trust boundaries and invariants
@@ -2620,11 +2698,10 @@ a supported language, CLI, ABI, or runtime surface.
 
 `workspace_graph/owned_function_import.rs` authenticates explicit nongeneric
 record signatures over Bytes and Copy scalars. `expected_projection/defaults.rs`
-precharges checking-only empty byte leaves with separate admitted/closed memo
-entries; actual execution retains the provider body and ordinary HIR/cleanup
-replay. Ordinary owning record-match results use the same result transfer
-before arm settlement in source verification, HIR, cleanup replay, interpreter,
-C11 and Core Wasm. No target repairs the canonical plan.
+precharges checking-only empty leaves; execution retains provider body and
+ordinary HIR/cleanup replay. Record-match results use the same transfer before
+settlement across verifier, HIR, interpreter, C11, and Wasm. No target repairs
+the canonical plan.
 
 The Project v8 empty-export route admits checked internal libraries in either
 manifest layout while leaving descriptor and public-package routes absent.
@@ -2840,7 +2917,30 @@ observations, not a second provider. The Cargo bridge byte-compares actual
 generator output with fixture assembly before executing it. The generated
 route now carries the descriptor, native binding, and field identities derived
 and independently replayed from one checked generic source subject into the
-external driver; the physical endpoint remains the labelled reversal fixture.
+external driver; that legacy settlement-corpus route retains its labelled
+reversal fixture. Separately, `codegen/native_emit/public_generic_bridge.rs`
+owns compiler-checked body admission and ordinary native emission for the
+private authenticated identity and movement-body profiles. The latter admits
+only origin-scoped field/record moves, immutable locals and literal branches;
+it rejects allocating or status-producing bodies before the physical handoff.
+`public_generic_abi/native/authenticated.rs` binds those checked bytes to a
+separate moves-v1 artifact, while the existing generated C/C++ consumers and
+provider admission retain carrier, ownership and settlement authority. The
+focused harness checks real checked-body output and postcondition cleanup;
+neither private profile grants general native-body or public support.
+The additive private allocating profile is owned separately by
+`codegen/native_emit/public_generic_bridge/allocating.rs` and its admission
+child. They close checked Bytes-only body/callee admission, replay the existing
+capacity summary, own the explicit-context reservation and result preflight,
+and require a zero semantic-lease ledger before publication.
+`codegen/native_byte_data/` owns only that profile's reserved allocator/drop
+fragments; the default runtime emitter retains its independently pinned bytes.
+`public_generic_abi/native/authenticated/allocating.rs` binds the checked
+artifact, while the existing sealed C/C++ caller generators retain framing
+and wrapper ownership. Canonical compiler cleanup, not arena teardown, owns
+semantic finalization; freeing bridge-owned backing cannot hide a leaked lease
+or replace the selected failure. This remains a private native-only bounded
+profile, not general-body, cross-backend or public-support acceptance.
 The authoritative contracts and nonclaims live in [Settlement Corpus
 v1](PUBLIC-GENERIC-SETTLEMENT-CORPUS-V1.md#native-calling-consumer-continuation-issue-162).
 

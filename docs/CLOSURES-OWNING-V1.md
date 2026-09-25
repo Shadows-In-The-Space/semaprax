@@ -16,9 +16,8 @@ resolving, exactly as before for the interpreter and now identically for
 native C11 and Core Wasm. See
 [Execution: three backends, one substitution](#execution-three-backends-one-substitution).
 
-This is SPX-AI-021's bounded owning-capture closure slice. It is a
-separately versioned and checked profile from
-[Scalar Snapshot Closures v1](CLOSURES-V1.md) and
+This is SPX-AI-021's bounded owning-capture closure slice, separately versioned
+and checked from [Scalar Snapshot Closures v1](CLOSURES-V1.md) and
 [v2](CLOSURES-V2.md): those profiles capture only Copy scalars and never
 admit an owning capture. This profile admits exactly one lexical owned
 `Bytes` capture and nothing else; it does not extend, relax, or reinterpret

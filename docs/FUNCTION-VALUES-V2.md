@@ -6,10 +6,10 @@ Status: implemented private callback profile; **HOSTED GREEN** under the
 Audience: language users, compiler contributors, collection-adapter authors,
 and backend implementers.
 
-This additive prerequisite advances reusable collection adapters. It does not
-introduce iterator objects, consuming `next`, captures, or a public callable ABI.
-Those implemented iterator and scalar-closure additions retain their separate
-contracts rather than changing this callback profile.
+This profile supports reusable collection adapters. It adds no iterator objects,
+consuming `next`, captures, or public callable ABI. The implemented iterator and
+scalar-closure features keep their separate contracts; they do not change this
+callback profile.
 
 ## Scoped callable signature
 
@@ -20,12 +20,11 @@ same declaration's sole type parameter. The function must otherwise satisfy the
 existing `Box<T>`/`Vec<T>` collection profile. Callable return slots and callable
 generic argument substitutions remain closed.
 
-Every concrete substitution independently checks the exact scalar callable
-signature from Function Values v1. References still identify monomorphic,
-effect-free local declarations; generic target references remain unsupported.
-Callables carry no environment or owner in this profile. Invocation evaluates
-arguments once, left to right, and propagates the selected target's ordinary
-checked failures.
+Each concrete substitution checks the exact scalar callable signature from
+Function Values v1 independently. A reference must identify a monomorphic,
+effect-free local declaration; generic target references remain unsupported.
+These callables carry no environment or owner. A call evaluates its arguments
+once, left to right, and propagates the target's ordinary checked failures.
 
 ## Reusable adapters
 

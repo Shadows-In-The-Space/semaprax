@@ -3,33 +3,20 @@
 - Audience: compiler contributors, language designers, and any agent asked to
   extend, self-host, or formally verify part of SEMAPRAX.
 
-- Status: proposed; trust-reduction programme opened, TCB inventoried, Kernel-0
-  defined with a paper (not mechanized) type-safety sketch, three capacity
-  ceilings measured with exact regression fixtures (one since fixed,
-  `SPX-P207` — see "Ceiling 3"), the Kernel-0 reification predicate
-  implemented and tested as an executable HIR admission check
-  (`src/kernel_zero.rs`), and the self-hosting gate ladder defined with
-  rung 1 reached and evidenced. No rung above 1 is reached. No proof in this
-  document is machine-checked. A later session added a from-scratch Kernel-0
-  reference interpreter (`src/kernel_zero/{term,value,eval}.rs`), an HIR
-  translator (`src/kernel_zero/reify.rs`), and a differential test against
-  the compiler's own interpreter backend over a deterministic corpus
-  (`src/kernel_zero/{corpus,differential}.rs`, a current 100-program target
-  after issue #188's later corpus-strengthening, fault-selection, and structural
-  passes, up from 74) — see "Reification"
-  and "Differential testing" below. This closes the reification predicate's
-  *faithfulness* gap only against a finite, non-exhaustive corpus. The same
-  corpus now also runs against native C11 and Core Wasm; all three are
-  evidence, not a proof, and cover no program outside that corpus. The
-  differential test run this session found **zero disagreements**, and,
-  independently of the compiler, found
-  that this document's own Progress theorem is incomplete as literally
-  stated for `i64` overflow and division/remainder by zero. A later
-  mechanization pass also closed the formerly missing `bool == bool`/
-  `bool != bool` typing/evaluation rule, so the proved comparison fragment
-  now agrees with the real language and the reification predicate at that
-  boundary; the remaining arithmetic-fault gap is recorded below rather
-  than silently patched.
+- Status: proposed trust-reduction programme. The TCB is inventoried; Kernel-0
+  has a paper, not machine-checked, type-safety sketch; three capacity ceilings
+  have exact fixtures (the `SPX-P207` ceiling was later fixed); and the
+  reification predicate is an executable HIR admission check in
+  `src/kernel_zero.rs`. The self-hosting ladder has evidence for rung 1 only;
+  no proof in this document is machine-checked.
+  A separate reference interpreter, HIR translator, and 100-program
+  deterministic corpus (`src/kernel_zero/{term,value,eval,reify,corpus,differential}.rs`)
+  compare Kernel-0 with the compiler interpreter, native C11, and Core Wasm.
+  The corpus grew from 74 after issue #188's strengthening passes and found
+  **zero disagreements**; finite differential tests address reification
+  faithfulness only for those programs, not as proof. The comparison fragment
+  now covers `bool == bool` / `bool != bool`, but the stated Progress theorem
+  still omits `i64` overflow and division/remainder by zero.
 
 ## Why this document exists
 

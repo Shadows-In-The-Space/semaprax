@@ -6,11 +6,11 @@ C source/header projection is not native execution or a general public ABI.
 
 Audience: compiler contributors, semantic agent clients and embedding hosts.
 
-The C artifact kind connects candidate review to actual native C11 source and
-header projections. It preserves the compiler's existing linkage, context,
-status and result-publication conventions. The files are inspectable compiler
-outputs, not a compiled library, standalone FFI header or supported SDK.
-Canonical `.spx` source remains authoritative.
+The C artifact kind lets agents inspect native C11 source and header projections
+during candidate review. It preserves the compiler's linkage, context, status,
+and result-publication rules. These files are compiler outputs, not a compiled
+library, standalone FFI header, or supported SDK. Canonical `.spx` source remains
+authoritative.
 
 ## API and source replay
 
@@ -98,12 +98,11 @@ Artifact generation and verification do not confer source-commit authority.
 
 ## Bounds and evidence
 
-The build/carrier limit remains 1 KiB–16 MiB. Native emission is bounded before
-its bytes are retained. Source groups, export selection, encoded artifact
-bytes and complete carrier output are bounded; overflow rejects the complete
-operation. Image summaries retain the 1 MiB limit and candidate deltas retain
-their existing 8 MiB report and logical-work limits. These are output and
-structural limits, not measured process-memory or execution-time guarantees.
+The build/carrier limit remains 1 KiB–16 MiB. Native emission, source groups,
+export selection, encoded artifacts, and the complete carrier are bounded;
+overflow rejects the operation. Image summaries retain their 1 MiB limit, and
+candidate deltas retain their 8 MiB report and logical-work limits. These
+limits do not guarantee process memory or execution time.
 
 The inventory permits at most 16 source groups and 32 manifest exports, hence
 at most 33 files including the native source. Aggregate hexadecimal artifact

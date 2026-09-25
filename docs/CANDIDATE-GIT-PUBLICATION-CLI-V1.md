@@ -14,11 +14,11 @@ The explicit command is:
 semaprax project-candidate-git-publish <manifest> <capsule.json> <approved-candidate-digest> <host-policy.json>
 ```
 
-The host selects this command and policy independently of the candidate. The
-capsule is an ordinary complete-candidate recovery capsule; it cannot select the
-repository, reference, author, executable or approval. The digest operand must
-match the restored candidate exactly. Unresolved drafts have no recovery capsule
-or publication route.
+The host chooses this command and policy independently of the candidate. The
+complete-candidate recovery capsule cannot choose a repository, reference,
+author, executable, or approval. The digest argument must exactly match the
+restored candidate. Unresolved drafts cannot use this recovery or publication
+route.
 
 The policy is a regular, bounded JSON file with exactly these fields:
 

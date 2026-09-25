@@ -18,9 +18,9 @@ No source text, serialized HIR, disk paths, approvals, or authority are imported
 The capsule digest is SHA-256 over the domain
 `semaprax.project-candidate-recovery.payload.v1\0`, the little-endian u64 byte
 length, and canonical payload bytes including LF, with `capsule_digest` omitted.
-It identifies content; it is not a signature, trusted provenance, or approval.
-A caller may construct another self-consistent valid history, but recovery still
-requires full compiler admission and exact final identity.
+The digest identifies content, not a signature, trusted provenance, or approval.
+A caller can construct another self-consistent valid history, but recovery still
+requires full compiler admission and the exact final identity.
 
 `ProjectCandidate::restore(admitted_base, expected_base, bytes)` requires the
 independently authenticated original source revision. It bounds input before
@@ -34,9 +34,9 @@ compiler compatibility, stale bases, and rehashed incorrect final identities fai
 The capsule limit is 64 MiB and history limit is 32 changes. Each change retains
 its 1 MiB input and ordinary structural/constructor limits. A raw preflight caps
 whole-capsule nesting at 128 and potential JSON nodes at `32 * (2 * 8192 + 128) + 256`;
-the ordinary serde recursion limit also applies. This permits bounded multiple
-changes without applying one change's node budget to the entire history.
-Serialized byte bounds are not total-memory or replay-time bounds.
+the ordinary serde recursion limit also applies. This lets the capsule hold multiple bounded changes without applying a single
+change's node budget to all history. Serialized byte limits do not bound total
+memory use or replay time.
 
 Diagnostics G236 cover capsule grammar, compatibility and canonical spelling;
 G237 covers capsule resource bounds; G238 covers original-base/content/final

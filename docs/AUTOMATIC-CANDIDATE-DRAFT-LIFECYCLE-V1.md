@@ -5,10 +5,10 @@ Status: implemented additive host-library lifecycle; **HOSTED GREEN** under the
 
 Audience: embedding hosts and agent-workspace integrators.
 
-`AutomaticRetentionLifecycle` composes one host-selected held candidate archive
-root with one distinct host-selected held semantic-retention registry root.
-Neither root can enter through a request, archive, receipt, generated client or
-environment lookup. Construction authenticates both roots and rejects aliasing.
+`AutomaticRetentionLifecycle` combines one host-selected candidate archive root
+with one distinct retention-registry root. Requests, archives, receipts,
+generated clients, and environment lookup cannot supply either root; construction
+authenticates both and rejects aliasing.
 
 For a candidate or draft, the operation independently replays and publishes the
 immutable typed archive first. Only its successful typed receipt can enter the

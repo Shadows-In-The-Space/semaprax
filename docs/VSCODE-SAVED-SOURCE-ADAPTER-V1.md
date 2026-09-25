@@ -8,13 +8,14 @@ broader product completion remain separately gated.
 
 Audience: editor users, extension integrators and compiler contributors.
 
-The optional extension in [editors/vscode](https://github.com/wavect/semaprax/blob/main/editors/vscode/README.md) connects
-an explicitly started local editor session to the existing
-[MCP stdio adapter](IMAGE-MCP-ADAPTER-V1.md). It provides stable-ID selection,
-compiler-derived change discovery, typed-intention submission and read-only
-source diffs for complete immutable candidates, plus ephemeral typed-hole
-planning, fills and explicitly selected compiler repairs. It does not make editor buffers
-canonical, install a compiler or publish source.
+The optional [VS Code extension](https://github.com/wavect/semaprax/blob/main/editors/vscode/README.md)
+connects an explicitly started local session to the
+[MCP stdio adapter](IMAGE-MCP-ADAPTER-V1.md). It offers stable-ID selection,
+compiler-derived change discovery, typed-intention submission, read-only
+diffs of immutable candidates, ephemeral typed-hole planning and fills, and
+explicitly selected compiler repairs. Editor
+buffers do not become canonical source; the extension installs no compiler
+and publishes no source.
 
 ## Startup and authority
 

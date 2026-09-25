@@ -4,14 +4,12 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: agent and tool authors, plus compiler contributors.
 
-Semantic Patch Evidence v1 is the first bounded proof-carrying-patch slice. It
-turns the already admitted single-file Patch v1/v2 operations and the sole
-canonical Patch v3 `assign-function-id` operation into an independently
-replayable evidence capsule, and provides a separate apply route that requires
-that exact replay before A0 staging or commit. Here, “proof-carrying” means a
-closed deterministic artifact whose admitted facts are independently rebuilt
-and byte-compared; it does not mean a signature, authenticated provenance, a
-general proof system, human approval, or target verification.
+Semantic Patch Evidence v1 packages a single-file Patch v1/v2 operation, or
+the sole canonical Patch v3 `assign-function-id`, into a capsule that another
+invocation can rebuild and compare byte-for-byte. The apply route replays it
+before A0 staging or commit. Here “proof” means that closed deterministic
+replay, not a signature, provenance, general proof system, human approval, or
+target verification.
 
 ## Commands and scope
 

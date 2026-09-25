@@ -8,12 +8,12 @@ separately gated.
 
 Audience: agent builders, embedding hosts and compiler contributors.
 
-An unfinished draft can move its valid history and pending typed holes onto an
-independently admitted source revision without completing those holes first.
-The compiler replays the checked history, rejects incompatible changes to
-pending regions, authenticates new expression identities and regenerates hole
-contexts. It never creates placeholder source or treats the prior valid body as
-the unfinished draft's intended replacement.
+An unfinished draft can move its valid history and pending typed holes to an
+independently admitted source revision. The holes need not be filled first.
+The compiler replays the history, rejects incompatible changes to pending
+regions, authenticates new expression identities, and rebuilds hole contexts.
+It creates no placeholder source and does not mistake the prior valid body for
+the draft's intended replacement.
 
 ## Library and history
 
@@ -27,9 +27,9 @@ The existing [candidate rebase](PROJECT-CANDIDATE-REBASE-V1.md) first replays th
 private last-valid candidate's complete intention history on the selected new
 base. This includes earlier successful fills. Its original conflict rules,
 intermediate source reconstruction and independent Project admission remain
-unchanged. A history conflict rejects the entire draft rebase before any result
-is installed. The new draft's eventual source diff is based on the selected
-new revision, not the abandoned original revision.
+unchanged. A history conflict rejects the whole rebase before installing any
+result. The eventual source diff uses the selected new revision as its base,
+not the abandoned original revision.
 
 Every successful rebase appends one bounded ancestry row naming the exact
 parent draft and destination Project revision. Filled-hole events survive with

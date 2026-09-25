@@ -6,16 +6,17 @@ Status: partially implemented at the full RFC scope. Admitted v0.4.0 profiles ha
 **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 
-This RFC defines the next useful-core tranche: nominal records, algebraic variants, `Option`, `Result`, exhaustive matching, and ownership of aggregate places. It deliberately introduces a resolved semantic layer before new syntax reaches either backend.
+This RFC covers the next useful-core tranche: nominal records, variants,
+`Option`, `Result`, exhaustive matching, and aggregate ownership. A resolved
+semantic layer comes before any new syntax reaches a backend.
 
 ## Current implementation baseline
 
-The released implementation includes scalar and owned records and variants,
-checked matching, compiler-owned Option/Result and admitted owned propagation,
-concrete generic ownership, explicit nonidentity forwarding, bounded argument
-inference through v3, nested record reconstruction, multiple record owners,
-private generic authored variants and compiler collections. Their exact scope
-is owned by [Generic Owned Result](GENERIC-OWNED-RESULT-V1.md),
+The release includes scalar and owned records/variants, checked matching,
+compiler-owned Option/Result, admitted propagation, concrete generic ownership,
+explicit forwarding, bounded v3 inference, nested reconstruction, multiple
+owners, private authored generic variants, and collections. Exact scope is in
+[Generic Owned Result](GENERIC-OWNED-RESULT-V1.md),
 [Explicit Forwarding](GENERIC-EXPLICIT-FORWARDING-V1.md),
 [Argument Inference v3](GENERIC-ARGUMENT-INFERENCE-V3.md),
 [Record Composition v2](GENERIC-OWNED-RECORD-COMPOSITION-V2.md),

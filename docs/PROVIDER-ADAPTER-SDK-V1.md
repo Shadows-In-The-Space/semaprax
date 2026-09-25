@@ -12,11 +12,10 @@ adapter/conformance boundary this document adds around
 [Model Budget Policy v1](MODEL-BUDGET-POLICY-V1.md), and
 [Model Call Receipt v1](MODEL-CALL-RECEIPT-V1.md).
 
-This document assumes the reader already knows Live Invocation Contract v1's
-`model.invoke` effect boundary (`src/live_invocation/model_invoke.rs`):
-`ModelHandler`, `ProposalDecoder`, `AuthorizationGate`, `InvocationBudgetHook`,
-and the closed `ModelFailure` failure domain. Everything below is additive to
-that contract, never a restatement or a second copy of it.
+Read Live Invocation Contract v1 first for `model.invoke`
+(`src/live_invocation/model_invoke.rs`): `ModelHandler`, `ProposalDecoder`,
+`AuthorizationGate`, `InvocationBudgetHook`, and closed `ModelFailure`. This
+SDK adds adapter rules without replacing that effect boundary.
 
 ## What already existed at the audit baseline (2026-09-11, `ae25c6a4`)
 

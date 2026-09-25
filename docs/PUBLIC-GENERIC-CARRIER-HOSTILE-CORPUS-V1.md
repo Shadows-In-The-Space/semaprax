@@ -1,5 +1,7 @@
 # Public Generic Carrier Hostile Corpus v1
 
+In plain terms: these hostile inputs prove that malformed carriers fail closed.
+
 Audience: ABI, carrier, ownership and generated-consumer maintainers, and
 reviewers of the fail-closed replay claim.
 
@@ -13,11 +15,10 @@ and no support claim follows from anything in this document.
 
 ## Scope
 
-This corpus is the one canonical, versioned manifest of hostile
+This is the canonical versioned manifest of hostile
 [Public Generic Carrier v1](PUBLIC-GENERIC-CARRIER-V1.md#canonical-carrier-bytes)
-logical carrier documents and native admission envelopes. Each entry names
-**exactly one** violated invariant and the single closed public refusal class
-every reader must publish for it.
+documents and native admission envelopes. Every entry breaks **one** invariant
+and names the one refusal class every reader must report.
 
 It covers:
 

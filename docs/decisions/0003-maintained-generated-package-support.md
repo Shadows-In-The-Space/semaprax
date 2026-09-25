@@ -1,75 +1,37 @@
 # ADR 0003: Maintained generated-package support for owned-data-api.v1 (Rust)
 
-Audience: maintainers deciding GitHub issue #145's scoped publication
-decision; compiler and release-tooling contributors.
-
-- Status: **Accepted for scope only, on 2026-09-19, by the repository
-  maintainer (Kevin, `kevin.riedl@wavect.io`, `wavect/semaprax` owner).** The
-  maintainer approved this ADR's scope decision in session and delegated the
-  eight open questions below to the implementing agent's judgment under one
-  stated constraint: decide whatever is best for the language long term. The
-  answers recorded in "Maintainer decision" below are that delegation
-  exercised, written down by the agent as scribe rather than self-approved.
-- **What is accepted is the scope, not a live support claim.** Questions 5 and
-  7 are answered "evidence first", and that evidence does not exist today, so
-  no package is described as maintained or supported yet. Accepting a scope
-  decision does not manufacture the evidence the claim would need. See
-  "Maintainer decision".
-- Date: 2026-09-19
+Status: scope decision accepted on 2026-09-19. The maintainer delegated the
+eight choices recorded below. Acceptance does not publish a package or prove
+support; evidence gates still apply. Issue #145 has since closed, but this
+historical decision is not a current-head release claim.
+Audience: maintainers and generated-package contributors.
 
 ## Context
 
-Issue #145 asks the repository to turn "one deliberately chosen existing
-generated-package preview" into a maintained, reproducible consumer route,
-without publishing anything, signing anything, or promoting the separate
-public generic-ABI decision (owned by #144/SPX-AI-045). Its three
-Definition-of-Done boxes are: (1) a scoped maintainer decision and maintained
-package consumer gate exist; (2) only approved package artifacts are actually
-published; (3) version/target/support claims match clean-install executable
-evidence.
+Issue #145 asked for one reproducible generated-package consumer route. It
+excluded publishing, signing, and the separate public generic ABI in #144.
+The support decision requires a scoped package, an executable consumer gate,
+and version/target claims backed by clean-install evidence.
 
-Prior commits `2ae8a968`, `88d826b0`, and `e0c7f192` did substantial work
-toward this: `2ae8a968` added `scripts/generated-package-release.py`, a
-release-preparation and dry-run-check wrapper around the compiler's existing
-generated-package output; `88d826b0` and `e0c7f192` extended it with a
-no-local-path/no-private-crate check against the packaging-normalized
-`Cargo.toml` and a checksum/source-association gate. That work already
-satisfies box 2 structurally: the tool refuses `--publish` unconditionally,
-has no live-publish code path, and refuses outright if a
-publish-credential-shaped environment variable is present (see
-`scripts/generated-package-release.py:32-41` and `:118-126`). Re-verified
-locally this session (macOS arm64, Darwin 25.5.0, this checkout):
+The release-preparation script from commits `2ae8a968`, `88d826b0`, and
+`e0c7f192` checks package bytes, checksums, source association, and absence of
+local paths or private crates. It has no live publish path, refuses
+`--publish`, and refuses publish-shaped credentials. A local macOS arm64 run
+on 2026-09-19 passed:
 
 ```sh
 python3 scripts/test-generated-package-release.py
-# Ran 21 tests in 0.61s -- OK (no skips; both real-npm and real-cargo
-# dry-run cases executed for real: npm 24.3.0 via nvm, cargo via Homebrew
-# were both present on PATH)
+# 21 passed, no skips; real npm and Cargo dry-run tools were available
 ```
 
-`docs/GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md` already exists as an
-unapproved design draft naming the open human decisions (registry identity,
-credentials, signing, CI wiring, tarball-install evidence). This ADR is the
-same proposal reworked into the repository's ADR sequence and house format
-(matching [ADR 0001](0001-graphify.md) and
-[ADR 0002](0002-managed-workspace-generations.md)), with its support matrix
-and evidence table re-verified against the current checkout rather than
-carried forward unchecked -- and, in two places, corrected: the draft's
-"Consumer install-from-tarball evidence" open item undersells how little
-automated evidence currently exists, and this session found the profile's own
-CI harness has no recent confirmed green hosted run (see Evidence below). The
-draft is left in place as background design material; nothing here deletes or
-supersedes its content, and a maintainer accepting a version of this ADR
-should still resolve the draft's five open items.
-
-Boxes 1 and 3 are the genuinely open ones, and box 1 requires an act of human
-authority this document cannot perform. This ADR's only job is to make that
-decision cheap and accurate to make.
+The earlier [decision draft](../GENERATED-PACKAGE-PUBLICATION-DECISION-DRAFT-V1.md)
+remains background. This ADR records the decision and its dated evidence;
+later support claims must be checked against current gates, not inferred from
+this historical snapshot.
 
 ## Decision
 
-Recommend exactly one profile, and only its Rust package, as the first
-maintained generated-package route:
+Choose one initial profile: the Rust package for `owned-data-api.v1`.
 
 | Field | Value |
 | --- | --- |
@@ -79,42 +41,19 @@ maintained generated-package route:
 | Owning specification | [docs/PUBLIC-OWNED-DATA-API-V1.md](../PUBLIC-OWNED-DATA-API-V1.md) |
 | npm package for the same profile | **Not recommended this round** (see below) |
 
-**Why owned-data-api.v1, specifically.** It is the one existing
-generated-package route `scripts/generated-package-release.py` already wraps
-end to end (`RUST_OWNED_DATA_FIXED_FILES` / `RUST_OWNED_DATA_ARCHIVE_NAMES` in
-`scripts/generated-package-release.py:69-80`), the one the existing
-unapproved draft names, and the one `docs/PUBLIC-OWNED-DATA-API-V1.md`
-describes as feature-complete pending only the publication decision. It is
-distinct from, and does not reinterpret, the separate general
-native-rust-interop-v1 scalar SDK (calculator/callback profile,
-`semaprax_native_rust_sdk`, its own `native-rust-sdk-v1` CI job) or the
-generic-ABI packages this issue excludes.
+The release-preparation script already handles this profile's fixed file and
+archive inventory. It is distinct from the general scalar Native Rust SDK
+and from the excluded generic-ABI packages.
 
-**Why Rust only, not npm too.** A local release-tool regression now packs,
-installs, byte-verifies and imports a real npm tarball made from a synthetic
-compiler-shaped fixture. That is useful tool-path evidence, but it is not
-clean execution evidence for a genuinely compiler-built package. The tests
-that install and run such a package from a real npm tarball
-(`tests/frame_payload_product_v1/npm_installation.rs:60`,
-`tests/image_packaged_typescript_workflow_v1.rs:715`) are both
-`#[ignore]`d pending "provisioned NODE, NPM_CLI and TypeScript 5.8.3
-TSC_CLI", and no CI job passes `--ignored` to unblock them. Recommending npm
-now would make a box-3 support claim ("clean-install executable evidence")
-that only synthetic evidence backs. The Rust side is not perfect either (see
-Evidence), but it has a defined package-generation wrapper, a dedicated test
-harness, and a CI job wired to run it -- a narrower, fully evidenced proposal
-beats a wider one resting partly on absent evidence.
+The npm tarball tests prove a local tool path using a synthetic fixture, not
+execution of a compiler-built package. The two real npm consumer tests were
+ignored pending provisioned Node/npm/TypeScript and were not run in that
+session. Rust has a generation wrapper and dedicated consumer harness, though
+it still needs the hosted evidence described below. Do not promote npm by
+borrowing Rust's evidence.
 
-**Why not the general native-rust-interop-v1 SDK instead.** That profile
-already has better-exercised hosted CI (the dedicated `native-rust-sdk-v1`
-job) and a real packaged-tarball consumer test
-(`packaged_tarball_consumer_round_trips_with_preserved_lockfile_and_source_tied_checksum`,
-added in `e0c7f192`), but issue #145 asks for one deliberately chosen
-profile, and `scripts/generated-package-release.py` was built around
-owned-data-api.v1's file inventory, not the scalar SDK's. Recommending both
-under one decision would blur which support claims are backed by which
-evidence; a maintainer wanting to promote the scalar SDK too should do so as
-a separate, explicitly evidenced decision.
+The general scalar SDK has a different package inventory and evidence. It
+needs a separate support decision rather than being folded into this one.
 
 ## Support matrix
 
@@ -158,7 +97,7 @@ means one unrelated subsystem's break can silently prevent it from ever
 running. That is a real gap between "the tests exist and are wired in" and
 "the tests are known to pass."
 
-## What approving this commits the maintainer to
+## Conditions before any support claim
 
 - **Rebuild-and-revalidate cadence.** Nothing here re-runs automatically on a
   schedule. Every dependency, toolchain, or compiler-output change to
@@ -219,7 +158,7 @@ running. That is a real gap between "the tests exist and are wired in" and
   row 8 remains weaker and separate. Approving this ADR is still a decision
   to collect and retain that evidence, not a claim that it already exists.
 
-## Open questions the maintainer must answer
+## Questions recorded for the scope decision
 
 1. Approve owned-data-api.v1's Rust package as the first maintained
    generated-package route, with npm explicitly deferred? (yes/no)
@@ -246,12 +185,10 @@ running. That is a real gap between "the tests exist and are wired in" and
    `#[ignore]`d tests are unblocked, or should it get its own separate ADR
    with its own evidence table? (extend-this-adr / separate-adr)
 
-## Maintainer decision
+## Recorded answers
 
 Recorded 2026-09-19. The maintainer approved the scope and delegated the eight
-questions above with the instruction to decide by what is best for the language
-long term. That constraint does most of the work below: in four of the eight, it
-argues *against* claiming more than the evidence supports.
+choices above. These answers require evidence before any support claim.
 
 1. **Yes — Rust only, npm deferred.** A narrow route that is fully evidenced is
    worth more than a wide one that is half evidenced. A support claim is very

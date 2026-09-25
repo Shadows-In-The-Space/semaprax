@@ -7,6 +7,10 @@ Status: implemented bounded profile; **HOSTED GREEN** under the
 publication, registry publication and broader public support remain separate;
 the mature-product claim remains Partial.
 
+Project v5 runs the bounded byte-search command through fixed native and
+Wasm/Node adapters. It makes the input profile and adapter capabilities
+explicit without adding general language-level process I/O.
+
 ## Closed fixed-adapter profile
 
 Project v5 is additive: v1-v4 canonical manifests, package bytes, carriers,
@@ -43,16 +47,17 @@ profile through the legacy `main` entry point.
 
 ## Native and Wasm/Node behavior
 
-The same target-neutral command admission authenticates the selected signature,
+Both targets use the same command checks before emission. These authenticate
+the selected signature,
 closure, stdout effect and permit, one-write path bound, and external-slice
-provenance before either target is emitted. A match may seal one authenticated
+provenance. A match may seal one authenticated
 external Slice parameter as the semantic transcript and exits 0 after a
 successful physical flush; the `spxgrep` fixture selects the original stdin
 slice. A non-match publishes no transcript and exits 1. Invalid adapter input,
 semantic or invariant failure, or stdout write/flush failure exits 2 and cannot
 be reported as semantic success.
 
-The generated native process adapter is fixed rather than user-programmable.
+Users cannot program the generated native process adapter.
 On Windows it uses `wmain`, rejects invalid UTF-16 while converting the single
 argument to UTF-8, and puts stdin and stdout in binary mode. On Unix it
 validates the argument bytes as UTF-8 and treats `SIGPIPE`/broken stdout as an

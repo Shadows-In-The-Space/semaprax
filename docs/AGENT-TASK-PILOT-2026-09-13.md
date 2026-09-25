@@ -1,17 +1,15 @@
 # Paired coding-agent pilot — 13 September 2026
 
-Status: private pilot cohort 2026-09-13; ineligible observations, no productivity or lane-parity claim.
-Audience: benchmark operators, agent integrators, and reviewers of comparative pilot evidence.
+Audience: benchmark operators, agent integrators, and pilot reviewers.
 
-All 18 expected tuples are accounted for exactly once. No candidate passed all
-task acceptance checks (0/18). Four processes completed and 14 timed out;
-process completion is not task acceptance. There were 1,180 MCP calls, including
-757 failed calls.
+This private pilot ran three tasks in both available Semaprax lanes, three
+times each. All 18 planned trials are accounted for; none passed every task
+check (0/18). Four processes completed and 14 timed out. The runs made 1,180
+MCP calls, including 757 failures. Process completion is not task acceptance.
 
-This private pilot executed the existing three tasks in both available Semaprax
-lanes with three repetitions. It supplies descriptive failed-run evidence;
-it does not establish model productivity, lane superiority, statistical
-significance, Zero parity, hosted support, or public benchmark eligibility.
+Status: ineligible observations from 13 September 2026. These failed runs do
+not establish productivity, lane superiority, statistical significance, Zero
+parity, hosted support, or public benchmark eligibility.
 
 The runner/configuration was frozen at `b8e7ccca19c715c1c835268e22c5cbdfbac3e365`,
 using compiler `06bec1c29adc0cc9c28671ba64bb2e7975a3381f`, SHA-256

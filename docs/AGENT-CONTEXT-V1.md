@@ -1,11 +1,12 @@
 # Agent context v1
 
-Audience: agent and tool authors, plus compiler contributors.
+Audience: agent and tool authors; compiler contributors.
 
-Status: implemented, additive semantic-query contract. It bounds deterministic
-UTF-8 JSON bytes and function facts; it does not claim an exact model-token
-budget, relevance ranking, repository-wide impact analysis, or facts absent
-from the current Graph v10-v14 lattice.
+Use this default query to inspect one function and its nearby facts without
+loading a whole semantic graph. It returns deterministic, bounded UTF-8 JSON.
+
+Status: implemented additive contract. It does not measure model tokens, rank
+relevance, analyze the whole repository, or invent facts outside Graph v10-v14.
 
 `semaprax.agent-context.v1` is the exact default CLI projection for:
 
@@ -15,7 +16,7 @@ semaprax context <file> <symbol|stable-id>
   [--filters contracts,ownership,effects,types,targets,diagnostics,tests,session_protocol]
 ```
 
-Supplying an explicit `--direction forward|reverse|both` selects the additive
+Add `--direction forward|reverse|both` to select the additive
 [`semaprax.agent-context.v2`](AGENT-CONTEXT-V2.md) contract; omitting it retains
 the v1 API, CLI behavior, and bytes.
 

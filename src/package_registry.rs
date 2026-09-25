@@ -127,7 +127,11 @@ pub mod artifact_manifest;
 pub mod binding;
 pub mod catalog;
 pub mod federation;
+pub mod leaf_manifest_v1;
+#[cfg(not(any(target_arch = "wasm32", target_arch = "wasm64")))]
+pub mod mirror_transport;
 pub mod registry_v2;
+pub mod registry_v3;
 pub mod trust;
 pub mod wire;
 

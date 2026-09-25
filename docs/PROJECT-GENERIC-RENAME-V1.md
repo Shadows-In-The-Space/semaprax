@@ -15,16 +15,15 @@ the source declaration against the retained checked template before changing
 source. It inventories at most 4,096 retained concrete instances owned by that
 template and rejects ambiguous, malformed, or duplicate retained identities.
 
-The source transformation changes only the provider display name and calls in
-the provider module whose existing binding resolves to the same stable
-declaration identity. Imported aliases in other modules stay unchanged. Calls
-with explicit type arguments retain those arguments and their evaluation order.
+The transformation changes the provider's display name and calls in its module
+that already resolve to that stable declaration identity. Imported aliases in
+other modules stay unchanged, as do explicit type arguments and their
+evaluation order.
 
 The candidate then follows the ordinary full-Project path: canonical format,
 reparse, Phase-A build, ownership and cleanup verification, linkage, profile
-admission, target admission, and an independent source replay. After replay,
-the compiler locates the same retained template owner and compares normalized
-checked HIR. It ignores the template and instantiated function display names,
+admission, target admission, and an independent source replay. After replay, the compiler finds the same retained template owner and compares
+the normalized checked HIR. It ignores the template and instantiated function display names,
 plus source spans that necessarily move after a width-changing rename. Stable
 structural expression/value identities are not ignored. Template identity and
 structure, concrete instance identities, exact type arguments, signatures,

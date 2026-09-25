@@ -9,18 +9,18 @@ This changes none of the 38 Partial/18 Missing totals.
 
 ## Authority boundary
 
-Economic Agent v1 consumes only a completed, already-replayed Agent Runtime
-result whose untrusted final message is a canonical Payment Intent. The model
-cannot approve, sign, broadcast, widen policy, or mint wallet authority. A
-separate injected approver binds the exact Policy, Intent, Plan, Simulation,
-and Approval Request. Opaque injected custody receives only the approved
-unsigned transaction and digest bindings; keys and credentials never enter the
-runtime, Trace, Evidence, or diagnostics.
+Economic Agent v1 accepts only a completed, replayed Agent Runtime result with
+a canonical Payment Intent as its untrusted final message. The model cannot
+approve, sign, broadcast, widen policy or create wallet authority. A separate
+injected approver binds the exact Policy, Intent, Plan, Simulation and Approval
+Request. Opaque injected custody receives only the approved unsigned transaction
+and digest bindings. Keys and credentials never enter the runtime, Trace,
+Evidence or diagnostics.
 
 The additive [Agent Payment Harness v1](AGENT-PAYMENT-HARNESS-V1.md) now binds
 that handoff to an exact compiler-derived AgentDefinition/AgentGraph and
-Economic Policy digest. It adds no economic authority and does not alter any
-Economic Agent v1 document, digest, state transition, or host contract.
+Economic Policy digest. That binding adds no economic authority and changes no Economic Agent v1
+document, digest, state transition or host contract.
 
 The public injected-host API admits only native assets on Sepolia EIP-1559 type-2,
 Solana devnet System Program transfers, Bitcoin regtest P2WPKH PSBT v2, and an

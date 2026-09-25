@@ -11,16 +11,14 @@ Audience: agents and reviewers coordinating more than one working agent
 against one exact candidate, and compiler contributors extending candidate
 evidence.
 
-This closes [#207](https://github.com/wavect/semaprax/issues/207). It adds
-exactly three things, all implemented by
+This closes [#207](https://github.com/wavect/semaprax/issues/207) with three APIs in
 `src/project/candidate/multi_agent_coordination.rs`:
 `ProjectCandidate::open_coordination_session`,
-`ProjectCandidate::evaluate_agent_proposals`, and the free function
-`record_scheduling_comparison`. It does not implement automatic rebase,
-automatic merge, a task scheduler, or an agent runner: this is proof data
-that a *separate*, already-authorized invocation (an ordinary
-`ProjectCandidate` rebase/build/test-selection/publication path) can consume,
-never a path that performs any of those itself.
+`ProjectCandidate::evaluate_agent_proposals`, and
+`record_scheduling_comparison`. They produce proof data for a *separate*,
+authorized `ProjectCandidate` rebase, build, test-selection, or publication
+invocation. They do not perform those actions, automatically merge or rebase,
+schedule tasks, or run agents.
 
 ## Bounded scope and the trap this issue names
 

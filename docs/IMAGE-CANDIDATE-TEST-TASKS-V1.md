@@ -4,10 +4,10 @@
   [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md).
 - Audience: embedding hosts, MCP/editor clients, and compiler contributors
 
-This contract turns the existing host-granted candidate reference-interpreter
-test into one bounded asynchronous task per v5 session. It adds scheduling and
-cooperative cancellation without adding source, process, network, target,
-artifact, or publication authority. Canonical `.spx` source remains authoritative.
+V5 can run the host-granted candidate reference-interpreter test as one bounded
+asynchronous task per session. Scheduling and cooperative cancellation add no
+source, process, network, target, artifact, or publication authority. Canonical
+`.spx` source remains authoritative.
 
 ## Selected surface
 

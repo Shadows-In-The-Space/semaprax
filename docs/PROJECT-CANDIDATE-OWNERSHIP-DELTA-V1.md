@@ -8,13 +8,12 @@ separately gated.
 
 Audience: compiler contributors and agents reviewing ownership-sensitive changes.
 
-This additive whole-candidate report compares checked nominal type shapes and
-type facts alongside parameter ownership, structural cleanup inventories,
-Shared Loan Plans and CleanupPlans between a candidate's original base and
-final admitted Project revision. It makes changed ownership evidence
-discoverable without querying every function or generating target artifacts.
-It does not introduce a new ownership analysis or alter the compiler's type,
-plan, validator or execution logic.
+This report compares ownership facts across a candidate's original base and
+final admitted Project revision: checked nominal type shapes and facts,
+parameter ownership, structural cleanup inventories, Shared Loan Plans and
+CleanupPlans. Reviewers can find changes without querying every function or
+generating target artifacts. The report adds no ownership analysis and changes
+no compiler type, plan, validator or execution logic.
 
 ## API and binding
 
@@ -34,8 +33,9 @@ modules do not identify the same function.
 
 Verification independently replays the entire candidate history and canonical
 candidate evidence before recomputing and comparing the exact report bytes.
-Submitted JSON, even with recomputed public digests, is never trusted as a plan,
-HIR attachment or source update. Evidence does not grant publication authority.
+Submitted JSON is not a trusted plan, HIR attachment or source update, even if
+its public digests have been recomputed. Evidence does not grant publication
+authority.
 
 ## Checked facts and comparisons
 

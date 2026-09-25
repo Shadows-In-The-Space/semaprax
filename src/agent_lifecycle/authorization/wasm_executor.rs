@@ -109,7 +109,12 @@
 //! Node boundary preserves only returned values and the compiler-owned
 //! arithmetic/contract status table; it authenticates redundant raw and
 //! normalized status fields before constructing an evaluation. It does not
-//! claim contract-detail, fuel, cleanup-event, or lifecycle settlement parity.
+//! claim contract-detail, fuel, variant-indexed-`Bytes` cleanup-event, or
+//! lifecycle settlement parity. A record `Bytes` projection does report its
+//! copy-out event only after the replay-verified generated facade returns an
+//! actual owned `Uint8Array`: that facade returns only after its private arena
+//! consumes the carrier and settles. This observes JS arena settlement, not a
+//! Wasm physical free or instruction count.
 //! The evidence this backend supports is local and re-runnable: its trusted
 //! embedding host supplies the runtime capability, and it claims nothing
 //! about hosted or browser support. The 64 KiB process-provider output ceiling
@@ -120,8 +125,6 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::agent_runtime::AgentCancellation;
-use crate::cleanup_plan::{ContractPhase, StatusCase};
-use crate::conformance::NormalizedStatus;
 use crate::diagnostic::Diagnostic;
 use crate::hir::{
     self, DeclarationId, OwnershipMode, ResolvedFieldDeclaration, ResolvedFunction, ResolvedType,
@@ -131,16 +134,20 @@ use crate::interpreter::retained_call::{
     PreparedRetainedCall, RetainedCallEvaluation, RetainedCallOutcome, RetainedField,
     RetainedRecord, RetainedValue, RetainedVariant,
 };
+use crate::interpreter::OwnedDataCleanupEvent;
 use crate::project;
 
 use crate::agent_lifecycle::stages::invariant;
 
 use super::{sealed, ExecutionAuthority, StageExecutor};
 
+#[path = "wasm_executor_outcome.rs"]
+mod outcome;
 #[path = "wasm_executor_process.rs"]
 mod process;
 #[path = "wasm_executor_workspace.rs"]
 mod workspace;
+use outcome::{decode_node_outcomes, NodeStageRun};
 pub use process::WasmStageHost;
 use process::{run_node_process, MAX_NODE_STDOUT_BYTES};
 use workspace::WasmStageWorkspace;
@@ -504,11 +511,16 @@ fn run_direct(
                 entry,
                 RetainedCallOutcome::LanguageFailure(status),
                 max_steps,
+                Vec::new(),
             ));
         }
-        NodeStageRun::Returned(mut values) => values
-            .pop()
-            .ok_or_else(|| invariant("wasm_executor.decode.arity"))?,
+        NodeStageRun::Returned(mut values) => {
+            let value = values
+                .pop()
+                .ok_or_else(|| invariant("wasm_executor.decode.arity"))?;
+            value.require_projection(false)?;
+            value.text
+        }
     };
     let value: i64 = value
         .parse()
@@ -518,18 +530,19 @@ fn run_direct(
         ResolvedType::Bool => RetainedCallOutcome::Returned(RetainedValue::Bool(value != 0)),
         _ => return Err(invariant("wasm_executor.decode.result_shape")),
     };
-    Ok(evaluation(entry, outcome, max_steps))
+    Ok(evaluation(entry, outcome, max_steps, Vec::new()))
 }
 
 fn evaluation(
     entry: &ResolvedFunction,
     outcome: RetainedCallOutcome,
     max_steps: usize,
+    cleanup_events: Vec<OwnedDataCleanupEvent>,
 ) -> RetainedCallEvaluation {
     RetainedCallEvaluation {
         function_id: entry.id.clone(),
         outcome,
-        cleanup_events: Vec::new(),
+        cleanup_events,
         // Core Wasm does not count interpreter steps; `native_executor.rs`
         // reports the same `0` for the same reason. Step counts are not
         // claimed comparable across engines.
@@ -1089,10 +1102,7 @@ fn run_through_injected_driver(
                 format!("String(api.functions['{}']())", driver.id)
             }
             Projection::Bool => format!("(api.functions['{}']() ? 'true' : 'false')", driver.id),
-            Projection::OwnedBytes => format!(
-                "Array.from(api.functions['{}'](), b => b.toString(16).padStart(2, '0')).join('')",
-                driver.id
-            ),
+            Projection::OwnedBytes => format!("api.functions['{}']()", driver.id),
             // Reads the variant case's byte payload one byte at a time until
             // the module reports `-1` (past the end). The cap is a
             // fail-closed bound, not a silent truncation: exceeding it throws
@@ -1125,12 +1135,20 @@ fn run_through_injected_driver(
                 entry,
                 RetainedCallOutcome::LanguageFailure(status),
                 max_steps,
+                Vec::new(),
             ));
         }
         NodeStageRun::Returned(values) => values,
     };
     let mut leaves = Vec::with_capacity(drivers.len());
-    for (driver, line) in drivers.iter().zip(&lines) {
+    let mut cleanup_events = Vec::new();
+    for (driver, row) in drivers.iter().zip(&lines) {
+        let expected_owned = driver.projection == Projection::OwnedBytes;
+        row.require_projection(expected_owned)?;
+        if expected_owned {
+            cleanup_events.push(OwnedDataCleanupEvent::CopyOutAndSettleBytes);
+        }
+        let line = &row.text;
         leaves.push(match driver.projection {
             Projection::I64 => RetainedValue::I64(
                 line.trim()
@@ -1205,7 +1223,7 @@ fn run_through_injected_driver(
             }))
         }
     };
-    Ok(evaluation(entry, outcome, max_steps))
+    Ok(evaluation(entry, outcome, max_steps, cleanup_events))
 }
 
 fn decode_hex(hex: &str) -> Result<Vec<u8>, Diagnostic> {
@@ -1320,9 +1338,13 @@ const normalizeFailure = error => {{
   const domain = raw <= 8 ? 'semaprax.arithmetic.v1' : 'semaprax.contract.v1';
   const code = raw <= 8 ? raw : raw - 8;
   if(error.status !== undefined && error.status !== raw || error.code !== undefined && (error.code !== code || error.domain !== domain)) throw new Error('SEMAPRAX stage status mismatch');
-  return {{schema:'semaprax.agent-wasm-stage-outcome.v1',kind:'language_failure',raw_status:raw,status:{{schema:'semaprax.status.v1',domain_id:domain,code,class:raw<=8?'arithmetic':'contract',retryable:false}}}};
+  return {{schema:'semaprax.agent-wasm-stage-outcome.v2',kind:'language_failure',raw_status:raw,status:{{schema:'semaprax.status.v1',domain_id:domain,code,class:raw<=8?'arithmetic':'contract',retryable:false}}}};
 }};
-const stage = call => {{try {{return {{schema:'semaprax.agent-wasm-stage-outcome.v1',kind:'returned',value:String(call())}}}} catch(error) {{return normalizeFailure(error)}}}};
+const stage = call => {{try {{
+  const value = call();
+  if(value instanceof Uint8Array) return {{schema:'semaprax.agent-wasm-stage-outcome.v2',kind:'settled_owned_bytes',value:Array.from(value,b=>b.toString(16).padStart(2,'0')).join(''),byte_length:value.byteLength}};
+  return {{schema:'semaprax.agent-wasm-stage-outcome.v2',kind:'returned',value:String(value)}};
+}} catch(error) {{return normalizeFailure(error)}}}};
 const calls = [
 {call_thunks}
 ];
@@ -1341,109 +1363,6 @@ process.stdout.write(out.map(value => JSON.stringify(value) + '\n').join(''));
     )
     ?;
     run_node_process(host, workspace, cancellation, output_budget)
-}
-
-#[derive(Debug)]
-enum NodeStageRun {
-    Returned(Vec<String>),
-    LanguageFailure(NormalizedStatus),
-}
-
-fn normalized_raw_status(raw: u64) -> Option<NormalizedStatus> {
-    let arithmetic = match raw {
-        1 => Some(StatusCase::AddOverflow),
-        2 => Some(StatusCase::SubOverflow),
-        3 => Some(StatusCase::MulOverflow),
-        4 => Some(StatusCase::DivisionByZero),
-        5 => Some(StatusCase::DivisionOverflow),
-        6 => Some(StatusCase::RemainderByZero),
-        7 => Some(StatusCase::RemainderOverflow),
-        8 => Some(StatusCase::NegationOverflow),
-        _ => None,
-    };
-    arithmetic
-        .map(crate::runtime_status::normalize_arithmetic)
-        .or_else(|| match raw {
-            9 => Some(crate::runtime_status::normalize_contract(
-                ContractPhase::Requires,
-            )),
-            10 => Some(crate::runtime_status::normalize_contract(
-                ContractPhase::Ensures,
-            )),
-            _ => None,
-        })
-}
-
-fn decode_node_outcomes(stdout: &str, expected: usize) -> Result<NodeStageRun, Diagnostic> {
-    let rows = stdout.lines().collect::<Vec<_>>();
-    if rows.is_empty() || rows.len() > expected || expected == 0 {
-        return Err(invariant("wasm_executor.outcome.arity"));
-    }
-    let row_count = rows.len();
-    let mut values = Vec::with_capacity(expected);
-    let mut failure: Option<NormalizedStatus> = None;
-    for row in rows {
-        let value: serde_json::Value =
-            serde_json::from_str(row).map_err(|_| invariant("wasm_executor.outcome.json"))?;
-        let object = value
-            .as_object()
-            .ok_or_else(|| invariant("wasm_executor.outcome.object"))?;
-        if object.get("schema").and_then(serde_json::Value::as_str)
-            != Some("semaprax.agent-wasm-stage-outcome.v1")
-        {
-            return Err(invariant("wasm_executor.outcome.schema"));
-        }
-        match object.get("kind").and_then(serde_json::Value::as_str) {
-            Some("returned") if object.len() == 3 => {
-                if failure.is_some() {
-                    return Err(invariant("wasm_executor.outcome.mixed"));
-                }
-                values.push(
-                    object
-                        .get("value")
-                        .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| invariant("wasm_executor.outcome.value"))?
-                        .to_owned(),
-                );
-            }
-            Some("language_failure") if object.len() == 4 => {
-                if !values.is_empty() {
-                    return Err(invariant("wasm_executor.outcome.mixed"));
-                }
-                let raw = object
-                    .get("raw_status")
-                    .and_then(serde_json::Value::as_u64)
-                    .ok_or_else(|| invariant("wasm_executor.outcome.raw_status"))?;
-                let status = normalized_raw_status(raw)
-                    .ok_or_else(|| invariant("wasm_executor.outcome.raw_status"))?;
-                let wire = object
-                    .get("status")
-                    .and_then(serde_json::Value::as_object)
-                    .filter(|wire| wire.len() == 5)
-                    .ok_or_else(|| invariant("wasm_executor.outcome.status"))?;
-                let class = if raw <= 8 { "arithmetic" } else { "contract" };
-                if wire.get("schema").and_then(serde_json::Value::as_str) != Some(status.schema())
-                    || wire.get("domain_id").and_then(serde_json::Value::as_str)
-                        != Some(status.domain_id())
-                    || wire.get("code").and_then(serde_json::Value::as_u64)
-                        != Some(u64::from(status.code()))
-                    || wire.get("class").and_then(serde_json::Value::as_str) != Some(class)
-                    || wire.get("retryable").and_then(serde_json::Value::as_bool) != Some(false)
-                    || failure.as_ref().is_some_and(|selected| selected != &status)
-                {
-                    return Err(invariant("wasm_executor.outcome.status_mismatch"));
-                }
-                failure = Some(status);
-            }
-            _ => return Err(invariant("wasm_executor.outcome.shape")),
-        }
-    }
-    match failure {
-        Some(status) if row_count == 1 => Ok(NodeStageRun::LanguageFailure(status)),
-        Some(_) => Err(invariant("wasm_executor.outcome.failure_arity")),
-        None if values.len() == expected => Ok(NodeStageRun::Returned(values)),
-        None => Err(invariant("wasm_executor.outcome.arity")),
-    }
 }
 
 #[cfg(test)]

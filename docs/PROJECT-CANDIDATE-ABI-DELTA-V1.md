@@ -11,10 +11,10 @@ Audience: compiler contributors and agents reviewing immutable Project candidate
 ## Scope
 
 `ProjectCandidate::abi_delta(expected_candidate)` emits a deterministic,
-candidate-bound comparison of ABI-shaped facts already admitted in the exact
-immutable base and final candidate revisions. The selected function inventory
-is the manifest's complete `web_exports` set plus its command function when
-present. Selection is by stable identity, never display name.
+comparison of ABI-shaped facts in the exact immutable base and final
+candidate revisions. It selects every function in the manifest's `web_exports`
+set and the command function, if present. Selection uses stable identities,
+never display names.
 
 Each function fact carries its stable ID, retained source module/path, effects,
 manifest roles, and ordered resolved signature. Parameters retain their value
@@ -38,10 +38,10 @@ files, or claim that a target row is a public linkable ABI.
 
 ## Comparison and binding
 
-Function, concrete public-nominal, and retained target facts are keyed in byte
-ordered maps. Their union is classified only as `added`, `removed`, `changed`,
-or `unchanged`; both exact side facts are retained, with an absent side encoded
-as JSON `null`. No compatibility label is inferred from a classification.
+Function, concrete public-nominal, and retained target facts use byte-ordered
+map keys. The report compares their union and labels each row only as `added`,
+`removed`, `changed`, or `unchanged`. It keeps both sides' exact facts, using
+JSON `null` for an absent side. These labels do not assess compatibility.
 
 The report binds the expected candidate digest, exact base/final Project and
 workspace revisions, both semantic graph digests, and a domain-separated digest
@@ -52,7 +52,7 @@ external-consumer status are always `not_assessed` in v1.
 submitted bytes, independently replays the complete candidate from its retained
 base and typed history, recomputes the report, and requires byte equality. It
 returns a separate verification record containing the submitted report digest.
-Submitted JSON is never treated as source, HIR, target evidence, or authority.
+Submitted JSON is a report to check, not source, HIR, target evidence, or authority.
 
 ## Bounds and diagnostics
 

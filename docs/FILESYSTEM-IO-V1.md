@@ -10,11 +10,11 @@ host-adapter implementers.
 
 ## Scope
 
-Filesystem I/O v1 is a closed, invocation-scoped host-operation profile. It
-does not give a checked program ambient access to a current directory, a home
-directory, environment path lookup, WASI, Node's `fs`, libc file functions, or
-an arbitrary host callback. A host supplies a `FileProvider` explicitly for
-one invocation and settles it before it publishes that invocation's result.
+Filesystem I/O v1 is a closed host-operation profile for one invocation. The
+host explicitly supplies a `FileProvider` and settles it before publishing the
+invocation's result. Checked programs gain no ambient current-directory, home,
+environment-path, WASI, Node `fs`, libc file-function or arbitrary-callback
+access.
 
 The compiler-owned operations are not authored imports:
 
@@ -32,10 +32,10 @@ nonempty subset of exactly `fs.read`, `fs.write`. Command, stdout/stderr,
 network, HTTPS, native-Rust-import, and public-interface authority are not
 part of this profile.
 
-Arguments evaluate left to right. Both operations are fallible. A nonzero
-normalized status selects the language failure before a result is initialized;
-ordinary sticky failure and canonical cleanup then apply. `true` and `false`
-are both successful semantic results.
+Arguments evaluate left to right, and either operation can fail. A nonzero
+normalized status selects language failure before result initialization;
+ordinary sticky failure and canonical cleanup follow. Both `true` and `false`
+count as semantic success.
 
 ## Path and payload bounds
 

@@ -6,10 +6,10 @@ Status: implemented bounded query; **HOSTED GREEN** under the
 [v0.4.0 release baseline](RELEASE-0.4.0-STATUS.md). This query does not itself
 promote language profiles, target support or programme completion.
 
-An immutable semantic image can list the concrete generic-function instances
-already retained from checked source and expand their exact facets. Canonical
-`.spx` remains authoritative. The query never specializes a new instance,
-executes a template, reads external files, or grants publication authority.
+List the concrete generic-function instances already retained in an immutable
+image, then expand their exact facets. The query does not create an instance,
+run a template, read external files, or grant publication authority. Canonical
+`.spx` remains authoritative.
 
 ## Selection and navigation
 

@@ -4,14 +4,13 @@ Status: versioned bounded reference; the completion matrix owns product status.
 
 Audience: integration tool authors and compiler contributors.
 
-`semaprax ui-schema <file.spx>` is a deterministic, read-only projection that
-turns one verified module into one canonical compact JSON envelope
-(`semaprax.ui-dialect-schema.v1`) describing its typed application schema. It
-is the first executable slice of the completion-matrix row "First-class
-application/state/UI dialect". It performs no rendering, provides no runtime,
-touches no DOM, adds no typed update/view language constructs, no semantic
-controls, no accessibility, navigation, localization, assets, platform blocks,
-or custom rendering, executes nothing, and changes no source.
+`semaprax ui-schema <file.spx>` describes one verified module's typed
+application schema in a canonical compact `semaprax.ui-dialect-schema.v1` JSON
+envelope. This deterministic read-only report is the first executable slice of
+the "First-class application/state/UI dialect" matrix row. It does not render,
+run, touch the DOM, add typed update/view syntax or semantic controls, or
+provide accessibility, navigation, localization, assets, platform blocks, or
+custom rendering. It executes nothing and changes no source.
 
 ## Command
 

@@ -9,13 +9,12 @@ broader product completion remain separately gated.
 Audience: agent-client authors, embedding hosts, release engineers, and
 programme reviewers.
 
-This contract defines one closed product workflow named
-`function_signature_review_publish_v1`. It composes existing v5 operations
-without changing their schemas, authority, or failure semantics. Canonical
-`.spx` remains repository authority. Its exact-subject gate passed for the
-captured subject above; every later subject requires fresh evidence. Static
-discovery exposes the available composition and exact profile binding but does
-not embed or infer executed support from the presence of constituent APIs.
+`function_signature_review_publish_v1` is one closed workflow built from
+existing v5 operations. It changes no schema, authority, or failure rule;
+canonical `.spx` remains repository authority. The exact-subject gate passed
+for the captured subject above, but another subject needs fresh evidence.
+Static discovery describes the composition and profile binding. Available
+APIs alone do not prove that the workflow ran successfully.
 
 ## Closed fixture and intention
 

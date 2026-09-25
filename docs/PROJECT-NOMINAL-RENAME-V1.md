@@ -6,9 +6,8 @@ Status: implemented bounded candidate and transport rename; **HOSTED GREEN** und
 Audience: compiler contributors, agent builders and semantic tool authors.
 
 The existing `rename_declaration` intention now selects explicit source record
-and variant identities as well as its existing function targets. It changes a
-display name and the references proven to use that declaration, then returns
-an immutable source-replayed candidate. It grants no filesystem or publication
+and variant identities as well as its existing function targets. It changes the display name and references proven to use that declaration,
+then returns an immutable candidate verified by source replay. It grants no filesystem or publication
 authority and introduces no new source syntax, graph schema or request fields.
 
 ```json
@@ -27,9 +26,9 @@ unsupported. Existing function rename behavior is unchanged.
 
 This route does not impose a new Copy-only or monomorphic type restriction.
 Existing Project admission and the shared authenticated occurrence collector
-determine which source shapes can be proven. Unsupported AST/HIR pairs still
-reject; they never become an empty successful reference inventory. General
-language, target or generic-import support is not widened by display renaming.
+determine which source shapes can be proven. Unsupported AST/HIR pairs are rejected, not reported as a successful empty
+reference inventory. Renaming a display name does not widen language, target,
+or generic-import support.
 
 The collector operates over the complete source set. Unsupported class/method,
 upcast, native-import or command-expression joins can therefore reject a rename

@@ -1,19 +1,18 @@
 # Kernel-0 Rung-2 Target and Recovery Evidence v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: local, private test gate for issue #188. It is unexecuted in this
 change, so it is not yet a passing local-evidence result. This document does
 not promote a self-hosting rung, transfer formatter authority, define a public
 target ABI, or introduce an owned `Bytes`/string buffer.
 
-Audience: compiler contributors and reviewers of Kernel-0 target evidence.
-
 ## Subject
 
-The closed subject is the five existing scalar byte lanes, in their authored
-bootstrap-v2 order: `char`, `bool`, `int`, `operator`, and `string-scalar`.
-Their Rust formatter boundaries remain authoritative. The target evidence is
-implemented by `src/kernel_zero/rung_two_bootstrap/target_execution.rs`; the
-recovery model is in `src/kernel_zero/rung_two_bootstrap/recovery.rs`.
+The subject is five scalar byte lanes in authored bootstrap-v2 order: `char`,
+`bool`, `int`, `operator`, and `string-scalar`. Rust formatter boundaries stay
+authoritative. Target evidence lives in `target_execution.rs`; recovery lives
+in `recovery.rs`.
 
 For every selected input, the harness obtains the Rust boundary's bytes first.
 It then checks all of the following against those bytes:

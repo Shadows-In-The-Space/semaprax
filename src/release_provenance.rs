@@ -76,6 +76,8 @@ const MANIFEST_SCHEMA: &str = "semaprax.release-manifest.v1";
 pub const TRUSTED_ISSUER: &str = "https://token.actions.githubusercontent.com";
 pub const TRUSTED_REPOSITORY: &str = "wavect/semaprax";
 pub const TRUSTED_WORKFLOW_PATH: &str = ".github/workflows/ci.yml";
+/// GitHub's immutable OIDC subject prefix for this exact owner/repository ID.
+pub const TRUSTED_OIDC_SUBJECT_PREFIX: &str = "repo:wavect@47505194/semaprax@1326961553";
 
 /// The admitted release archive platforms, independent of
 /// `scripts/release-reconcile.py`'s `ARCHIVE_TARGETS` (a Python tuple this
@@ -673,7 +675,10 @@ pub fn verify_signature_claim_binds_provenance(
             claim.identity_issuer
         )));
     }
-    let expected_subject = format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{}", provenance.tag);
+    let expected_subject = format!(
+        "{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{}",
+        provenance.tag
+    );
     if claim.identity_subject != expected_subject {
         return Err(identity_error(format!(
             "signature claim identity.subject {:?} does not match the expected subject {expected_subject:?} \

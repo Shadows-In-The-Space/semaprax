@@ -32,14 +32,13 @@ The result schema is
 reports and binds their exact byte streams with SHA-256 values. It also retains
 the source-review report revision, bundle digest, candidate/base/Project/
 Workspace/graph identities, and a domain-separated revision for the complete
-combined report. Nested reports do not acquire authority by composition.
+combined report. Combining the reports does not give them authority.
 
 ## Meaning and nonclaims
 
-The report places reviewable source changes beside the external contracts the
-compiler cannot observe from source alone. It therefore exposes known blind
-spots rather than treating absence of compiler graph edges as proof that no
-external dependency exists.
+The report places source changes beside external contracts that source alone
+cannot verify. It shows known blind spots: a missing compiler graph edge does
+not prove that an external dependency is absent.
 
 All source, approval, publication, filesystem, environment, generator,
 network, provider, runtime, conformance and deployment authority or observation

@@ -13,11 +13,10 @@ contributors.
 
 Version 2 of the authority-free scaffold adds one file, `AGENTS.md`, to every
 template of [version 1](PROJECT-SCAFFOLD-V1.md): the calculator application
-and the library package. A project created by either `new` route or
-materialized from the capsule now carries, next to its source, the commands
-that check, test, run, format, and build it and the language rules that differ
-from other languages. Coding agents read such a
-file before their first edit; people benefit from the same page. Everything
+and the library package. Projects created by either `new` route or from the capsule now include check,
+test, run, format and build commands alongside their source. The file also
+explains language rules that differ from other languages. It helps both coding
+agents, which read it before their first edit, and people. Everything
 else v1 promised is preserved: the artifact owns no path, handle, process, or
 publication authority, and materialization remains entirely caller-owned.
 
@@ -52,9 +51,8 @@ The capsule schema is exactly `semaprax.project-scaffold.v2`. It selects only:
 
 The digest domain is `semaprax.project-scaffold.digest.v2`; every other
 digest, canonicality, and replay rule of v1 applies unchanged, including the
-requirement that replay equal a fresh derivation. A v1 capsule does not replay
-against v2 and a v2 capsule does not replay against v1; the schema field and
-the digest domain both differ.
+requirement that replay equal a fresh derivation. V1 and v2 capsules cannot replay against each other: both the schema field and
+digest domain differ.
 
 ## File contents
 

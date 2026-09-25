@@ -10,10 +10,9 @@ Audience: compiler contributors and native-runtime reviewers.
 
 ## Contract and defect
 
-Owned `string` values contain exact UTF-8 bytes. U+0000 is data, not an end
-marker. Byte length, scalar count, equality, cloning, concatenation, prefix
-and substring operations must observe the whole value, including content
-after a NUL byte. Empty text and a single NUL scalar are distinct values.
+Owned `string` values keep exact UTF-8 bytes. U+0000 is data, not a terminator.
+Length, scalar count, equality, clone, concatenation, prefix, and substring
+operations must read beyond NUL. Empty text differs from a single NUL scalar.
 
 The source lexer, canonical formatter, HIR literals, and native literal
 escaping already preserve those bytes. The defective ordinary native runtime

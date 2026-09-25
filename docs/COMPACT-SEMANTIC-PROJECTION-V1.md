@@ -10,13 +10,9 @@ view repeatedly (model prompts, caches, wire transport), plus compiler
 contributors working on issue #201 ("Add a compact lossless semantic
 projection optimized for model context and transport").
 
-Compact Semantic Projection v1 (`../src/compact_semantic_projection.rs`)
-re-encodes an already-selected semantic view -- the whole resolved program
-graph (`crate::graph::to_json`) or a byte/node-bounded call closure
-(`crate::graph::agent_context_v2_json`) -- into a smaller wire form, and
-decodes it back to the exact same bytes. It never selects, filters, or
-budgets anything itself; it calls those two existing engines unchanged and
-only re-encodes their output.
+Compact Semantic Projection v1 re-encodes an already selected whole graph or
+bounded call closure into a smaller wire form, then restores the exact bytes.
+It does not select, filter, or budget: existing graph engines own those steps.
 
 ## What already existed before this module
 

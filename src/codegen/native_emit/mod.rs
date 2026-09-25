@@ -459,7 +459,11 @@ fn emit_native_prelude_inner(
         });
     }
     if program_uses_byte_data(program) || strings.provider_carriers {
-        native_byte_data::emit_runtime(output);
+        if strings.reserved_bytes {
+            native_byte_data::emit_reserved_runtime(output);
+        } else {
+            native_byte_data::emit_runtime(output);
+        }
     }
     if native_vec::program_uses_vec(program) || native_iter::program_uses_iterator(program) {
         native_vec::emit_runtime(output, program);

@@ -9,13 +9,10 @@ broader product completion remain separately gated.
 Audience: people and agents writing `semaprax.toml`, package-tooling authors,
 and compiler contributors.
 
-Package Manifest v1 is the one extensible `semaprax.toml` layout. Each frozen
-[Project Manifest v1](PROJECT-MANIFEST-V1.md) through v13 schema fixes a
-whole-file sequence of assignments, so every product tranche so far has added
-a new `semaprax.project.vN` string. This layout instead admits one closed
-catalog of optional tables and keys under a single schema string,
-`semaprax.manifest.v1`, and lowers every admitted manifest onto the frozen
-profile contract it selects. Future tranches add a table or a key to this
+Package Manifest v1 is the extensible `semaprax.toml` layout. Older Project
+Manifest schemas fix a whole-file assignment sequence; this schema uses one
+closed optional-table catalog, `semaprax.manifest.v1`, then lowers each admitted
+manifest to its selected frozen profile. Future tranches add a table or key to
 specification; they do not add a whole-project schema.
 
 The frozen layouts remain admitted and byte-for-byte unchanged. A project may

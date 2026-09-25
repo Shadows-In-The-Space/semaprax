@@ -12,8 +12,8 @@ use std::process::Command;
 use semaprax::release_provenance::{
     parse_signature_claim, parse_sigstore_message_signature_bundle,
     verify_manifest_artifacts_on_disk, verify_provenance_binds_manifest,
-    verify_signature_claim_binds_provenance, ARCHIVE_PLATFORMS, TRUSTED_REPOSITORY,
-    TRUSTED_WORKFLOW_PATH,
+    verify_signature_claim_binds_provenance, ARCHIVE_PLATFORMS, TRUSTED_OIDC_SUBJECT_PREFIX,
+    TRUSTED_REPOSITORY, TRUSTED_WORKFLOW_PATH,
 };
 
 fn root() -> &'static Path {
@@ -68,7 +68,10 @@ fn trusted_identity_constants_match_the_script_and_the_policy_document() {
              spec = importlib.util.spec_from_file_location('rp', 'scripts/release-provenance.py')\n\
              m = importlib.util.module_from_spec(spec)\n\
              spec.loader.exec_module(m)\n\
-             print(json.dumps({'repository': m.TRUSTED_REPOSITORY, 'workflow_path': m.TRUSTED_WORKFLOW_PATH}))\n",
+             claim_spec = importlib.util.spec_from_file_location('claim', 'scripts/release-signature-claim.py')\n\
+             claim = importlib.util.module_from_spec(claim_spec)\n\
+             claim_spec.loader.exec_module(claim)\n\
+             print(json.dumps({'repository': m.TRUSTED_REPOSITORY, 'workflow_path': m.TRUSTED_WORKFLOW_PATH, 'oidc_subject_prefix': claim.TRUSTED_OIDC_SUBJECT_PREFIX}))\n",
         ])
         .current_dir(root())
         .output()
@@ -83,6 +86,7 @@ fn trusted_identity_constants_match_the_script_and_the_policy_document() {
             .expect("parser must print a JSON object");
     assert_eq!(parsed["repository"], TRUSTED_REPOSITORY);
     assert_eq!(parsed["workflow_path"], TRUSTED_WORKFLOW_PATH);
+    assert_eq!(parsed["oidc_subject_prefix"], TRUSTED_OIDC_SUBJECT_PREFIX);
 
     let policy = fs::read_to_string(root().join("docs/RELEASE-SIGNING-POLICY-V1.md"))
         .expect("docs/RELEASE-SIGNING-POLICY-V1.md must exist");
@@ -93,6 +97,10 @@ fn trusted_identity_constants_match_the_script_and_the_policy_document() {
     assert!(
         policy.contains(TRUSTED_WORKFLOW_PATH),
         "policy document must record the exact trusted workflow path string"
+    );
+    assert!(
+        policy.contains(TRUSTED_OIDC_SUBJECT_PREFIX),
+        "policy document must record the exact immutable OIDC subject prefix"
     );
     assert!(
         policy.contains("https://token.actions.githubusercontent.com"),
@@ -481,7 +489,7 @@ fn release_signature_claim_cli_derives_exact_bundle_material_and_rejects_replay(
     assert_eq!(parsed.certificate, "Y2VydGlmaWNhdGU=");
     assert_eq!(
         parsed.identity_subject,
-        "repo:wavect/semaprax:ref:refs/tags/v9.9.9"
+        "repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/v9.9.9"
     );
 
     let check = Command::new("python3")

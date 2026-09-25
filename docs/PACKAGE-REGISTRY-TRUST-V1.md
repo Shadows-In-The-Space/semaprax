@@ -6,12 +6,11 @@ Audience: package-registry, security, and host-integration contributors.
 
 ## Scope and authority
 
-`package_registry::trust` composes existing Ed25519 verification with exact
+`package_registry::trust` combines Ed25519 verification with exact
 [Registry Snapshot v2](PACKAGE-REGISTRY-SNAPSHOT-V2.md) and
-[Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) replay. Its separation
-of root, publisher/targets, snapshot, and timestamp roles follows the security
-model of [TUF specification 1.0.26](https://theupdateframework.github.io/specification/v1.0.26/).
-The closed SEMAPRAX wire below is deliberately not TUF wire compatibility.
+[Artifact Manifest v1](PACKAGE-ARTIFACT-MANIFEST-V1.md) replay. Its root,
+publisher/targets, snapshot, and timestamp roles follow [TUF 1.0.26](https://theupdateframework.github.io/specification/v1.0.26/),
+but SEMAPRAX wire is not TUF-compatible.
 
 The embedding host supplies an independently installed root, trusted prior
 checkpoint data, and one fixed Unix-seconds update-start time. There is no
@@ -33,8 +32,9 @@ Before any authority-bearing consumer can use this result, a separate host
 must authenticate and lock the real checkpoint store, recheck the selected
 root/time/input bytes, durably compare-and-commit the complete transition
 against `prior_checkpoint_digest`, and coordinate recovery with cache effects.
-This batch implements none of those host effects, so `fetch --lock` remains
-the earlier offline integrity boundary and gains no registry-trust claim.
+The additive local host below implements a separate managed generation store.
+`fetch --lock` remains the earlier offline integrity boundary and gains no
+registry-trust claim or access to that store.
 
 ## Wire and bounds
 
@@ -177,6 +177,8 @@ they do not execute artifacts or claim availability at a mirror.
 | `SPX-PKR623` | Expiry, backwards time/version, same-version equivocation, or root mismatch. |
 | `SPX-PKR624` | Exact metadata, inventory, manifest or artifact association disagreement. |
 | `SPX-PKR625` | Absent or yanked selected subject/artifact. |
+| `SPX-PKR626` | Local held-store authority, pin, shape, capacity or precommit exact-state refusal. |
+| `SPX-PKR627` | Retained/ambiguous local effects requiring explicit exact revalidation recovery. |
 
 Existing independent registry, manifest, and Lock-v3 replay diagnostics remain
 unchanged. Focused tests live in `src/package_registry/trust/tests.rs`; their
@@ -187,8 +189,108 @@ manifest substitution, expiry, rollback/equivocation, mix-and-match, root
 rotation, revoked publishers, artifact bytes, yanks, checkpoint round-trip,
 and refusal without independently admitted entries.
 
-Remaining work includes a durable authenticated root/checkpoint host, atomic
-recovery coordination with cache publication, explicit transport/mirror
+Remaining work includes authority-bearing fetch integration, explicit transport/mirror
 capabilities and availability tests, deployed publisher key custody and
 rotation operations, and authorized hosted evidence. This local verifier
 creates no authority for those actions and does not complete R19.
+
+## Explicit local durable host
+
+`trust::host::HeldTrustStore` is an additive Linux/Android/Apple local host,
+not a production trust deployment or a new CLI. Unsupported hosts refuse
+`open` without effects. No ambient clock, network, key, home or publication
+authority is acquired. The embedding caller explicitly supplies the existing
+store directory, independently obtained bootstrap root digest, immutable input
+bytes, independently admitted entries and fixed trusted Unix-seconds time.
+The module cannot authenticate the pin's origin or the clock's truth. Deriving
+the pin from downloaded root bytes defeats its trust assumption.
+
+The directory must already exist, be owned by the effective user, and have no
+group/world permission bits. Every ancestor is opened without following links
+and retained; subsequent operations recheck the held directory chain. Absolute
+and ordinary relative paths work; parent traversal (`..`) is refused. A held
+directory lock serializes cooperating writers. Files are owner-private,
+single-link regular files opened with nofollow; inode/name association and
+bounded exact bytes are checked. Hostile mutation by the same principal,
+administrative whole-store rollback/deletion, compromised storage, and a
+filesystem that lies about synchronization are excluded. This is not hardware
+antirollback or protection against an attacker controlling the trusted host.
+
+`install` is explicit bootstrap into an empty directory, requiring an independent
+pin equal to the exact canonical root digest and an unexpired root. The initial
+checkpoint records the supplied install time. `open` never repairs or bootstraps
+missing/corrupt state. The initial root bytes and pin binding remain in the
+immutable predecessor chain. Root rotation is accepted only together with a
+fresh verified update, using the existing exact one-version dual-threshold
+rotation and retaining its signed envelope; there is no unsigned root replacement
+or implicit key reset. Successive rotations each require such an update.
+
+`commit_update` takes fresh metadata and independently admitted entries, not a
+`RegistryUpdateCandidate` supplied as authority. Under the lock it rechecks the
+loaded exact root/checkpoint and ACTIVE bytes, replays signatures, freshness,
+registry admission, optional Lock-v3 and exact subject selection, and all supplied
+manifest-bound artifact associations. The candidate's prior-checkpoint digest must equal the
+hash of the stored checkpoint string bytes. Artifacts additionally must belong
+to selected lock subjects when a lock is supplied. Without a lock, artifacts are
+admitted by their exact signed manifests, not by a dependency-closure claim.
+An empty cache selection may advance trust alone; nonempty subject selections
+require a complete valid lock. Each artifact is a
+byte buffer, not a path to open. No executable artifact is run.
+
+Trust state and selected cache bytes are one canonical
+`semaprax.registry-trust-generation.v1` JSON file, at most 64 MiB. Fields are
+`schema`, `previous`, `root`, `checkpoint`, `rotation`, `time`, `metadata`, and
+`cache`. Root/checkpoint and metadata are exact original strings; artifacts are
+lowercase hex byte strings. The generation name is `g-` plus its raw lowercase
+SHA-256 hex. At most 64 immutable generations are retained; selected artifact
+payloads total at most 16 MiB and at most 768 entries, with no duplicate
+coordinate/path. Capacity refuses before staging; no automatic GC exists.
+
+Effect ordering is:
+
+1. Create-new `PENDING`, write the complete generation, sync its file, verify
+   exact bytes and sync the held directory.
+2. No-replace rename to the generation name and sync the directory.
+3. Create-new and sync `ACTIVE.next` containing the exact generation name;
+   create-new and sync `COMMIT` with the same name.
+4. Recheck predecessor ACTIVE and generation bytes, rename `ACTIVE.next` to
+   `ACTIVE`, and sync the directory. This is the single coordinated trust/cache
+   visibility pivot, not a transaction across arbitrary paths or the old cache.
+5. No-replace rename `COMMIT` to `c-<generation-name>`, sync the directory, then
+   recheck the complete chain/inventory before returning a receipt.
+
+Every predecessor requires its exact completed marker. Ordinary open rejects
+pending files, orphan generations, missing markers, unknown inventory, digest
+tamper, and an ACTIVE rollback leaving later generations. It also syncs the
+directory before returning. Failures after effects return no success receipt;
+files are never deleted or rolled back. The retained COMMIT marker makes an
+interrupted ACTIVE switch an explicit recovery condition.
+
+`recover_update` requires the independently retained predecessor generation
+digest and exact original update request. It validates the predecessor chain,
+replays the original fixed-time generation byte-for-byte, and separately
+rechecks metadata at the supplied recovery time, which cannot precede the
+original time. Only the exact complete pending generation, its no-replace
+published form, or its already-pivoted ACTIVE can finish. Unknown effects,
+changed request bytes, partial stage writes, or expired metadata fail closed
+without deletion. `recover_install` similarly requires the original root, pin
+and install time plus a fresh recovery time; ordinary open never invokes it.
+Partially written stages require external operator reconciliation; this module
+does not guess ownership of or truncate an interrupted file.
+
+Current registry-v2 admission requires a linked Build-v2 root. The source
+capsule requires two through four modules reachable from that root, whereas a
+complete acyclic semantic lock includes a leaf. Until an independently verified
+leaf-package admission profile exists, this store claims only manifest-bound
+artifact cache commits, not a demonstrated complete registry-to-Lock-v3 fetch
+workflow. Neither admission rule is weakened to manufacture such evidence.
+
+The non-cloneable held store returns only `CommitReceipt` digest evidence, not
+a reusable/serializable fetch token. This batch provides no managed-cache read
+or execution route. The pure candidate remains non-authoritative and the
+existing flat `fetch --lock` cache remains untouched. Tests in
+`trust/host/tests.rs` cover local physical bootstrap, held lock/permissions/link
+refusal, exact durable checkpoint and real manifest-artifact update, signed root
+rotation/revocation, crash-point recovery, partial-write
+fail-stop, tamper/retained-history rollback, stale time and yanked selection.
+Those local tests do not establish physical power-loss or cross-host durability.

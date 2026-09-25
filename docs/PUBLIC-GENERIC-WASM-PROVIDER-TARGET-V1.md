@@ -1,20 +1,20 @@
 # Public Generic Wasm Provider Target v1
 
-Status: **internal admission and compiler-owned Core Wasm artifact implemented**.
+Audience: compiler contributors and Wasm provider integrators.
 
-Audience: compiler contributors and reviewers of the internal public-generic
-Wasm provider target.
+Status: **internal admission and compiler-owned Core Wasm artifact implemented**.
 
 This document owns the additive compiler target selected by the Package
 Manifest v1 profile `public-generic-wasm-provider.v1`. It creates a checked,
 replayable compiler subject and a closed executable provider for issues #162
 and #229. It does not publish a supported public generic ABI.
 
+In plain terms: the compiler can build this narrowly defined Wasm provider, but nobody is promised a supported public interface.
+
 ## Manifest contract
 
-The profile is available only through the canonical `semaprax.manifest.v1`
-table layout. It lowers to the internal project contract
-`semaprax.project.v20`; no frozen positional v20 manifest is accepted.
+The profile is available only through canonical `semaprax.manifest.v1` tables.
+It lowers to `semaprax.project.v20`; frozen positional v20 manifests fail.
 
 The manifest must contain:
 
@@ -24,9 +24,8 @@ The manifest must contain:
 - no effect, interface, permit, or publication authority; and
 - the ordinary bounded source and test-module inventories.
 
-Existing scalar, text, byte, owned-data, and record profiles are unchanged.
-In particular, this profile does not relax `SPX-W115` or reinterpret an
-existing `web_export` calling convention.
+Existing profiles are unchanged. In particular, this one does not relax
+`SPX-W115` or reinterpret an existing `web_export` calling convention.
 
 ## Admission product
 

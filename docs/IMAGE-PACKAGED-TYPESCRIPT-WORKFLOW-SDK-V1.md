@@ -11,11 +11,10 @@ evidence-runner authors.
 
 ## Purpose
 
-The `@semaprax/agent-workflow` package supplies the bounded
-`function_signature_review_publish_v1` driver for Node.js 22 or later. It
-composes a generated v5 TypeScript codec through one caller-supplied transport;
-it does not contain a compiler, select a workspace, open a process, or acquire
-source-publication authority.
+For Node.js 22 or later, `@semaprax/agent-workflow` provides the bounded
+`function_signature_review_publish_v1` driver. It uses a generated v5 TypeScript
+codec and a caller-supplied transport. It contains no compiler and cannot select
+a workspace, open a process, or gain source-publication authority.
 
 The driver preserves the workflow's two authority domains. `runReview` accepts
 a review codec, one review-session transport, and a typed target, ordered scalar

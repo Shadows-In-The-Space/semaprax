@@ -391,7 +391,7 @@ mod tests {
         }
     }
 
-    /// Diagnostic, not a regression gate: the full `SPX-G171` measurement
+    /// Diagnostic, not a regression gate: the full builder-byte measurement
     /// against the real `examples/catalog-normalizer-project` plus the exact
     /// two bundled dependencies it declares (`std.data.json.dec`, transitively
     /// `std.io`). Run with
@@ -399,11 +399,9 @@ mod tests {
     ///
     /// The report is intentionally diagnostic rather than a limit-changing
     /// regression gate. It uses the complete current project manifest closure
-    /// and prints bounded per-module attribution. The application gate has
-    /// reproduced a live `SPX-G171` during graph construction; this test
-    /// checks only that the refusal names the existing cap, not that any
-    /// accounting mode is accepted or that a particular byte estimate stays
-    /// fixed.
+    /// and prints bounded per-module attribution. The complete application
+    /// now fits the unchanged builder cap through the compact final mode;
+    /// the non-ignored application gate owns behavioral acceptance.
     #[test]
     #[ignore = "diagnostic measurement tool, not a regression gate; run with --ignored --nocapture"]
     fn catalog_normalizer_project_reference() {
@@ -591,22 +589,12 @@ mod tests {
                 Err(errors) => eprintln!("{label}: refused ({})", errors[0].code),
             }
         }
-        let diagnostics = match crate::workspace_graph::build_owned(sources) {
-            Ok(_) => panic!("the current full manifest closure unexpectedly fits the builder cap"),
-            Err(diagnostics) => diagnostics,
-        };
-        let diagnostic = diagnostics
-            .iter()
-            .find(|diagnostic| diagnostic.code == "SPX-G171")
-            .expect("the bounded graph refusal keeps its stable diagnostic code");
-        assert!(
-            diagnostic.message.contains(&MAX_BUILDER_BYTES.to_string()),
-            "the report should name the unchanged builder cap, got: {}",
-            diagnostic.message
-        );
+        let measured = crate::workspace_graph::build_owned(sources)
+            .expect("complete catalog project must fit the unchanged builder cap");
         eprintln!(
-            "build_owned (complete manifest closure): refused with {} under unchanged cap {}: {} help={:?}",
-            diagnostic.code, MAX_BUILDER_BYTES, diagnostic.message, diagnostic.help
+            "full closure live builder bytes={} below_contract_by={}",
+            measured.usage.builder_bytes,
+            MAX_BUILDER_BYTES - measured.usage.builder_bytes
         );
     }
 

@@ -7,18 +7,18 @@ historical local witnesses. Public generic ABI and support remain separately gat
 
 Audience: compiler contributors and reviewers.
 
-Private effect-free functions may declare one explicit type parameter and move
-compiler-owned `Box<T>` and `Vec<T>` carriers through parameters and results.
-The parameter is instantiated with exactly `i64`, `i32`, `u8`, `usize`, `char`,
+Private effect-free functions may declare one explicit type parameter and pass
+compiler-owned `Box<T>` and `Vec<T>` through parameters and results.
+That parameter is instantiated with exactly `i64`, `i32`, `u8`, `usize`, `char`,
 `f32`, `f64`, or `bool`. Local Box/Vec intrinsic composition behind scalar
 signatures uses the same profile. Owned elements, nested collections, inference,
 and public aggregate ABI declarations remain outside this profile.
 
-Source verification checks all eight substitutions. HIR independently checks
-exact compiler-owned nominal identities, scoped parameter identities, intrinsic
-calls, materialized function bodies, and canonical cleanup plans. Existing
-Box v1 and Vec v1 allocation, borrowing, generation transfer, failure, and
-lexical settlement rules apply without a new runtime ABI or prelude contract.
+Source verification checks all eight substitutions. HIR separately checks
+compiler-owned nominal and scoped parameter identities, intrinsic calls,
+materialized bodies, and canonical cleanup plans. Box v1 and Vec v1 keep their
+allocation, borrowing, generation-transfer, failure, and lexical-settlement
+rules; this profile adds no runtime ABI or prelude contract.
 
 Focused evidence belongs to `language::generic_collections_next` and
 `owned_data::generic_owned_function_runtime::collections`. The latter exercises

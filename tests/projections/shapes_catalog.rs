@@ -66,7 +66,7 @@ fn render_catalog() -> (String, String, usize) {
     output.push_str(
         "Audience: agents and humans writing SEMAPRAX declarations from an installed compiler.\n\n",
     );
-    output.push_str("Every shape below is the canonical header of a declaration in a committed, verified example, rendered by the same documentation model as `semaprax doc`, so the catalog cannot show a shape the compiler rejects. `semaprax help shapes` prints this document. The [agent quick reference](AGENT-QUICK-REFERENCE.md) explains the rules behind the shapes, and [Documentation Projection v1](DOC-PROJECTION-V1.md) owns the model. Identities are the examples' own `@id` attributes; bodies are omitted.\n");
+    output.push_str("Every shape below is a canonical declaration header from a committed verified\nexample, rendered by the same model as `semaprax doc`; the catalog therefore\ncannot show rejected syntax. `semaprax help shapes` prints it. The\n[agent quick reference](AGENT-QUICK-REFERENCE.md) explains the rules, and\n[Documentation Projection v1](DOC-PROJECTION-V1.md) owns the model. IDs come\nfrom the examples; bodies are omitted.\n");
     let mut count = 0;
     let mut entries = Vec::new();
     for (kind, heading) in SECTIONS {

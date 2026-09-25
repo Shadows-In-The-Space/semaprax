@@ -8,11 +8,10 @@ broader product completion remain separately gated.
 
 Audience: language users, tool authors, compiler contributors, and reviewers.
 
-Shared Loan Plan v1 is the target-neutral proof artifact for the exact
-synchronous immutable borrows already admitted by verified HIR. It gives each
-loan an exact owner place, provenance, and path-sensitive lifetime so source
-verification and HIR replay can reject an overlapping move, transfer, or
-assignment while that loan is live. The plan is compiler-owned data: it
+Shared Loan Plan v1 records proof for synchronous immutable borrows admitted
+by verified HIR. Each loan names its owner place, provenance, and path-sensitive
+lifetime. Source verification and HIR replay use those facts to reject moves,
+transfers, or assignments that overlap a live loan. The compiler-owned plan
 creates no runtime reference, cleanup action, capability, or authority.
 
 This is the required foundation for nested owned-aggregate borrowing. The

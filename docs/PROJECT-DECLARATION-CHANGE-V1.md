@@ -8,8 +8,8 @@ authoring-time, ignored, or separately provisioned observations below retain
 their narrower scope; public promotion and broader product completion remain
 separately gated.
 
-The additive `add_declaration` intention creates one explicit, monomorphic
-function, record, or variant in an existing Project module. Functions cannot
+Use `add_declaration` to create one explicit, monomorphic function, record, or
+variant in an existing Project module. Functions cannot
 be named `main`; record/variant fields use the closed data-type vocabulary
 below. The intention travels through
 the existing [Semantic Change and Candidate](PROJECT-CANDIDATES-V1.md) envelope,
@@ -45,9 +45,8 @@ contracts, effects, source paths, or source-text defaults.
 ```
 
 `target` authenticates one existing explicit monomorphic top-level anchor. A
-`main` anchor is allowed because its signature and body remain unchanged. The
-new function is appended after the module's existing function declarations;
-the anchor does not grant a filesystem path or arbitrary insertion position.
+`main` anchor is allowed because its signature and body remain unchanged. The new function is appended after existing function declarations. The anchor
+does not select a filesystem path or arbitrary insertion position.
 
 The new ID is 1–128 ASCII bytes from `[a-z0-9._-]`. It must be unused in the
 complete retained declaration graph and module bindings, including IDs from

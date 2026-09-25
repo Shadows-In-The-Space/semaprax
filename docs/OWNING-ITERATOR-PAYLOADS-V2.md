@@ -7,10 +7,9 @@ The broader iterator and public-library goals remain incomplete.
 Audience: language, ownership, cleanup, backend, and standard-library
 contributors.
 
-This profile extends [Owning Iterators v1](OWNING-ITERATORS-V1.md) to consuming
-iteration of `Vec<Bytes>`. It defines the ownership boundary for `Iter<Bytes>`
-and `IterStep<Bytes>`, and for `for own` traversal, without widening borrowed
-vector access or the public ABI. The implementation selects Prelude
+V2 extends [Owning Iterators v1](OWNING-ITERATORS-V1.md) to consume
+`Vec<Bytes>`. It defines ownership for `Iter<Bytes>`, `IterStep<Bytes>`, and
+`for own`, without widening borrowed vector access or the public ABI. It selects Prelude
 v8, CleanupPlan v13, and Graph v45. Each is selected only when the exact
 retained `Iter<Bytes>`/`IterStep<Bytes>` types, including the local `Done` case
 and signatures, are present; scalar Prelude v7, CleanupPlan v10-v12, and

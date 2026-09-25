@@ -1,11 +1,14 @@
 # Agent Task Economics v1
 
-Status: integrated observation and deterministic export executed locally for
-exact subject `474c481bf3c3561c144e077f0000460f61af55f2`, with both format reports
-authenticated by the focused bundle. No productivity, latency, model-token or
-completion claim.
-
 Audience: agent evaluators, workflow integrators, and compiler contributors.
+
+This report records the exact compiler-protocol traffic of one scripted Agent
+workflow. It is not a productivity, latency, model-token, or task-completion
+study.
+
+Status: local integrated observation and deterministic export for subject
+`474c481bf3c3561c144e077f0000460f61af55f2`; the focused bundle
+authenticated both format reports.
 
 The integrated
 [graph-operational Git workflow](PROJECT-GRAPH-OPERATIONAL-GIT-WORKFLOW-V1.md)

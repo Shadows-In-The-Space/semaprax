@@ -1,17 +1,15 @@
 # Kernel-0 Rung-2 Bootstrap Artifact v1
 
+Audience: compiler and self-hosting contributors.
+
 Status: local, private reproducibility evidence for issue #188. This is not a
 release artifact, a public ABI, a formatter authority grant, target-execution
 evidence, hosted evidence, or a self-hosting-rung promotion.
 
-Audience: compiler contributors and reviewers of Kernel-0 bootstrap evidence.
-
 This document owns `semaprax.kernel-zero-rung-two-bootstrap.v1`, the closed
-binary artifact emitted by `src/kernel_zero/rung_two_bootstrap/`. Its purpose
-is deliberately narrow: a future reviewer can retain one exact compiler output
-for all current pure renderer fragments, decode it independently, and replay
-the ordinary compiler routes from the exact retained source instead of trusting
-an old in-memory `BoundTranslation` or a self-reported build result.
+artifact from `src/kernel_zero/rung_two_bootstrap/`. It lets a reviewer retain,
+independently decode, and replay one exact output for the pure renderer
+fragments rather than trusting cached translation state or a build report.
 
 ## Subject and boundary
 

@@ -1,14 +1,13 @@
 # Agent Observation Schema v1
 
-Status: compiler-owned bounded same-module slice.
+Audience: compiler, runtime, service, and generated-consumer maintainers.
 
-Audience: compiler, Agent-runtime, semantic-service, and generated-consumer maintainers.
+This contract derives an Observation schema from a checked source Agent and
+its `observation` role. The role must identify a persistent, monomorphic record
+or non-empty variant in the same module; cross-module role lookup is not
+supported here.
 
-This contract derives one closed Observation/context grammar from a
-language-native source Agent and the verified HIR type bound to its
-`observation` role. The role identity must resolve in the same checked module
-to one persistent, monomorphic record or non-empty variant. This slice does not
-perform cross-module role resolution.
+Status: compiler-owned, bounded same-module implementation.
 
 ## Canonical derivation
 

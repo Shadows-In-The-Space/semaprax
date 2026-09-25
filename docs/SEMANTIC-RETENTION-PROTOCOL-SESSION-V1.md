@@ -9,14 +9,13 @@ Audience: embedding hosts, compiler contributors, and protocol reviewers.
 
 ## Startup selection
 
-`VNextSession::with_retention_lifecycle` is an opt-in host API used before the
-session accepts any protocol input. It accepts one explicit existing private
-registry root, one bounded `RetentionPolicy`, and either an exact expected
-cursor digest or the explicit uninitialized expectation. It constructs the
-existing `RetentionLifecycleCoordinator`, so the authenticated registry root
-and metadata directory file descriptors and identities remain held for the
-session lifetime. Request parameters, generated clients, MCP tools, receipts,
-and source cannot select or replace that root, policy, or cursor expectation.
+Before accepting protocol input, a host may opt in through
+`VNextSession::with_retention_lifecycle`. It supplies an existing private
+registry root, bounded `RetentionPolicy`, and either an exact expected cursor
+digest or an explicit uninitialized expectation. The resulting coordinator
+holds authenticated root and metadata directory identities for the session.
+Requests, generated clients, MCP tools, receipts, and source cannot replace
+the root, policy, or expectation.
 
 Attaching twice or after protocol input fails. The ordinary coordinator startup
 checks still reject stale policy/cursor bindings, substituted paths, malformed

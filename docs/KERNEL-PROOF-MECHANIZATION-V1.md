@@ -5,14 +5,10 @@
   kernel) — see "Relationship to issue #186" below, which that issue's own
   audit asked this document to answer explicitly.
 
-- Status: research + spike, not a completed mechanization. Answers two
-  questions from `docs/SEMANTIC-KERNEL-V1.md`'s own follow-up list ("pick a
-  proof engine... and wire a CI gate that fails on any admitted
-  axiom/`sorry`/`admit`") with evidence fetched this session, then spikes
-  part of Kernel-0 in the recommended assistant (Lean 4) and **ran it**: the
-  transcripts below are verbatim, not reconstructed. No CI workflow is added
-  by this document; one is proposed in text, priced from measurements taken
-  on this exact host.
+- Status: research + spike, not a completed mechanization. It answers the
+  proof-engine and no-holes-gate questions from `SEMANTIC-KERNEL-V1.md`, then
+  runs a Lean 4 Kernel-0 spike. The transcripts are verbatim. It adds no CI
+  workflow; the proposed one is only costed from this host's measurements.
 - Scope: this document and a new `proofs/` directory only. It does not touch
   `docs/SEMANTIC-KERNEL-V1.md`, `src/`, `crates/`, `tests/`, `benchmarks/`,
   `scripts/`, or `.github/`, all of which other agents hold.

@@ -11,9 +11,9 @@ Audience: compiler contributors and native-runtime reviewers.
 ## Scope
 
 This correction applies to ordinary C11 generation (`emit_c` and `emit_hir_c`)
-and the bounded stdout-transcript lane. It implements the existing inline
-String cleanup convention for already admitted source. It adds no syntax,
-types, intrinsic operations, public ABI, schema, import, or ambient authority.
+and bounded stdout transcripts. It applies the existing inline String cleanup
+rule to admitted source. It adds no syntax, type, intrinsic, public ABI, schema,
+import, or ambient authority.
 
 The original correction used the private owner-cell machinery introduced for
 the [v10 owned UTF-8 provider](PUBLIC-OWNED-UTF8-API-V1.md). The additive

@@ -15,7 +15,7 @@ and `body\n` followed by the selected JSON bytes with dictionary references.
 The digest uses v1’s existing domain-separated SHA-256 over the source length
 and exact reconstructed selected bytes.
 
-For a selected document smaller than 16,384 bytes, the dictionary is empty.
+Documents smaller than 16,384 bytes use an empty dictionary.
 Otherwise, only JSON string literals at least 16 bytes long, including quotes
 and escape spelling, that occur at least twice enter the dictionary. Entries
 are sorted by their exact UTF-8 bytes and numbered from zero. The body replaces
@@ -27,12 +27,11 @@ or model is consulted during encoding.
 
 ## Validation and replay
 
-`encode_model_text` consumes an opaque existing `CompactProjection`.
-`decode_model_text` parses the envelope independently, expands references with
-source bounds checked before appending, verifies the selected-byte digest, and
-normalizes through the existing projection encoder. Re-encoding must reproduce
-the entire v2 wire exactly, which rejects alternate dictionary order, duplicate
-entries, unnecessary references and noncanonical number or header spellings.
+`encode_model_text` consumes an existing opaque `CompactProjection`.
+`decode_model_text` independently parses, bounds expansion before appending,
+checks the selected-byte digest, and normalizes through the existing encoder.
+Re-encoding must reproduce v2 exactly, rejecting alternate dictionary order,
+duplicates, unnecessary references, and noncanonical numbers/headers.
 `decode_model_text_and_verify` also verifies the expected profile, root and
 source revision with the existing binding diagnostic. Integrity is not origin
 authentication: the CLI replay route additionally regenerates the selected
@@ -52,13 +51,11 @@ requires the exact version/encoding/profile intersection; v1 `text` or `binary`
 cannot negotiate as v2. Existing binary-before-text preference is retained,
 with model-text following those encodings when multiple offers are common.
 
-`scripts/benchmark_compact_projection.py` measures full JSON, v1 text and v2
-model-text with the same cached cl100k/o200k tokenizers, while independently
-replaying all three wire forms including binary. The complete envelope counts
-toward measurements. Small inputs can grow because metadata has a fixed cost;
-this format does not claim universal savings, exact token budgets, or billing
-authority. The benchmark records exact bytes and hashes, tokenizer versions
-and vocabulary fingerprints. Results are local, not a hosted/provider result.
+`scripts/benchmark_compact_projection.py` measures full JSON, v1 text, and v2
+model-text with cached cl100k/o200k tokenizers and replays all forms, including
+binary. It counts the whole envelope. Small inputs can grow from fixed metadata;
+this format claims neither universal savings nor token/billing authority.
+Results record exact bytes, hashes, tokenizer versions, and vocabulary fingerprints.
 
 ## Local measurements
 

@@ -8,18 +8,14 @@ Audience: maintainers, release engineers, and security reviewers.
 
 ## Scope and current state
 
-[Issue #168](https://github.com/wavect/semaprax/issues/168) asks for
-authentic signing and machine-verifiable provenance for tagged releases.
-Nobody working this issue has a signing key, a local keyless-signing (Sigstore)
-identity, a registry credential, or authority to publish, tag, or trigger a
-release workflow; per `AGENTS.md`, generated code and this repository's own
-tooling gain no ambient signing authority. The configured GitHub-hosted
-`publish-release` job alone receives a short-lived OIDC token when it runs.
-This document and its paired implementation therefore split the work into what
-is safely buildable without any secret -- the **provenance document**, the
-**identity policy**, **binding verification**, and cryptographic replay against
-caller-supplied historical trusted-root bytes -- and the hosted evidence and
-human review that remain after wiring.
+[Issue #168](https://github.com/wavect/semaprax/issues/168) tracks signed,
+machine-verifiable tagged releases. Wavect GmbH authorized a v0.6.0 tag gate,
+but that gate has not produced a qualifying release. Generated code and the
+compiler have no signing or publication authority. Only the configured GitHub
+`publish-release` job can receive a short-lived OIDC token. Local work covers
+the provenance format, trusted identity, binding checks, and replay against an
+explicit historical trusted-root snapshot. Hosted signing and human review
+remain separate steps.
 
 **The release archives remain unsigned.** `docs/RELEASE-PROCESS.md`'s
 nonclaims correctly still say so, and this document must not be read as
@@ -53,13 +49,15 @@ cross-checks all three (code, script, and this table) agree.
 | Trusted OIDC issuer | `https://token.actions.githubusercontent.com` | The only accepted token issuer for a keyless (Sigstore/Fulcio) identity -- GitHub Actions' own OIDC provider. A claim from any other issuer is rejected regardless of its other fields. |
 | Trusted repository | `wavect/semaprax` | The only accepted GitHub repository slug. |
 | Trusted workflow path | `.github/workflows/ci.yml` | The only workflow file whose run may claim to have produced a release. |
+| Immutable OIDC subject prefix | `repo:wavect@47505194/semaprax@1326961553` | Pins the GitHub owner and repository IDs for this repository's current immutable-subject configuration; a rename/transfer requires an explicit policy revision. |
+| Policy owner | Wavect GmbH release maintainers | Own the workflow, identity rotation and revocation decision; a coding agent cannot change trust roots or publish a release on its own. |
 | Tag pattern | `refs/tags/v<MAJOR>.<MINOR>.<PATCH>` | Bound per-release, not globally: verification always compares against the *exact* tag the provenance statement under test itself declares (its `tag` field), not a wildcard. This is what makes "replayed provenance from another version" fail: the expected identity subject is recomputed from the tag under test, so a claim minted for `v0.4.1` cannot satisfy a check against `v0.4.2`. |
 
 The expected GitHub OIDC **`sub` claim** for a release built from tag
 `vX.Y.Z` is exactly:
 
 ```
-repo:wavect/semaprax:ref:refs/tags/vX.Y.Z
+repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/vX.Y.Z
 ```
 
 The Fulcio certificate identity used by `cosign verify-blob` is the workflow
@@ -69,6 +67,11 @@ URL SAN, exactly:
 https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
 ```
 
+An independent `cosign verify-blob` invocation must pin
+`--certificate-identity "https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z"`;
+that URL-SAN check alone does not replace this verifier's immutable OIDC
+subject and repository/owner ID extension checks.
+
 The corresponding provenance **workflow reference** (the same identity
 without the URL scheme and host) is exactly:
 
@@ -76,11 +79,15 @@ without the URL scheme and host) is exactly:
 wavect/semaprax/.github/workflows/ci.yml@refs/tags/vX.Y.Z
 ```
 
-These are GitHub Actions' standard identity representations for a
-tag-triggered workflow run using `id-token: write`. The OIDC `sub` claim and
-the Fulcio certificate URL SAN are deliberately distinct; the former belongs
-in the structural signature claim below, while the latter is passed to
-cosign's `--certificate-identity` verification option.
+The immutable `sub` prefix is the repository's currently configured GitHub
+OIDC policy (`use_immutable_subject: true`), not an inferred name-only subject.
+The OIDC `sub` and Fulcio certificate URL SAN are deliberately distinct. The
+structural signature claim records the expected `sub`. After verifying the
+signature and certificate chain, the offline verifier checks the Fulcio leaf's
+embedded original-token subject (OID `1.3.6.1.4.1.57264.1.24`) and immutable
+repository/owner IDs (OIDs `.15` and `.17`) against this policy, as well as the
+certificate URL SAN and issuer. The structural claim is not itself evidence;
+all three extension values must be present exactly once in the verified leaf.
 
 ### Rotation and revocation
 
@@ -151,9 +158,9 @@ certificate encodings. It does **not** sign, verify a signature, contact a
 transparency log, select/download a trust root, read a CI environment
 variable, or publish. The independent Rust consumer still parses the complete
 closed bundle framing before a caller-supplied offline verifier receives it.
-The current workflow does not invoke this builder or publish a claim/root yet;
-the script is deliberately a reviewable offline prerequisite rather than a
-claim that a signed release already exists.
+The current workflow invokes this builder and publishes a claim/root only on a
+qualifying tag after its release gate. No such signed hosted release has yet
+been accepted; the script alone remains no signature or publication evidence.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -161,7 +168,7 @@ claim that a signed release already exists.
 | `subject_digest` | `sha256:<64 lowercase hex>` | Digest of the exact `semaprax.release-provenance.v1` document bytes this claim signs. |
 | `subject_name` | string | Human-readable label for the subject (e.g. `release-provenance.json`). |
 | `identity.issuer` | string | Must equal the trusted OIDC issuer. |
-| `identity.subject` | string | Must equal `repo:<trusted repository>:ref:refs/tags/<tag>` for the exact tag the provenance document declares. |
+| `identity.subject` | string | Must equal the pinned immutable OIDC subject prefix plus `:ref:refs/tags/<tag>` for the exact tag the provenance document declares. This is a policy expectation, not an independently extracted certificate fact. |
 | `identity.workflow_ref` | string | Must equal `<trusted repository>/<trusted workflow path>@refs/tags/<tag>`, and must also agree with the provenance document's own `builder.workflow_identity`. |
 | `algorithm` | string | One recognized value (currently only `sigstore-cosign-bundle-v0.3`); recognizing a value here is a structural admission, not a cryptographic endorsement. |
 | `signature` | string (opaque) | A deterministic projection copied from the bundle and checked byte-for-byte against it. Cryptographic verification consumes the canonical bundle field rather than treating this duplicate string as another signature. |
@@ -462,7 +469,12 @@ repository has, which is unrelated -- it authenticates a *doctor-installed
 generation directory*, not a release archive), production support, or
 semantic/compiler correctness.
 
-## Hosted-release follow-up (`HUMAN_BLOCKED`)
+## Hosted-release follow-up (v0.6.0 gate has a failure)
+
+The old-head v0.6.0 tag run has [partial successful hosted jobs](RELEASE-0.6.0-STATUS.md),
+but at least one job failed and others have not concluded. A source-locked
+coverage repair is now on `main`, but it does not retroactively certify that
+tag, a signed artifact, or publication.
 
 The workflow now applies items 1-4 below on a qualifying tag. They are listed
 as an auditable configuration contract, not as a claim that a signed release
@@ -479,7 +491,8 @@ historical evidence are changed.
    Sigstore/Fulcio certificate whose URL SAN is bound to
    `https://github.com/wavect/semaprax/.github/workflows/ci.yml@refs/tags/<tag>`
    over the final aggregate provenance. The underlying GitHub OIDC `sub`
-   remains `repo:wavect/semaprax:ref:refs/tags/<tag>`; it is not the
+   is `repo:wavect@47505194/semaprax@1326961553:ref:refs/tags/<tag>` under
+   this repository's immutable-subject configuration; it is not the
    certificate identity accepted by `cosign verify-blob`. No repository
    signing secret is configured.
 2. **The signing tools are pinned.** The workflow pins both
@@ -494,8 +507,11 @@ historical evidence are changed.
    `SHA256SUMS`. It then runs `scripts/release-manifest.py`,
    `scripts/release-provenance.py`, and signs the resulting
    `release-provenance.json`. It never signs a manifest before the last archive
-   is built and independently attested, and `gh release create` fails rather
-   than replacing an existing release's assets.
+   is built and independently attested. Before `gh release create`, the
+   publisher streams the exact Linux CLI member from the attested archive and
+   runs `doctor verify-release` against the frozen trusted-root digest and
+   complete held directory. A cryptographic/identity refusal stops publication;
+   `gh release create` also fails rather than replacing existing assets.
 4. **The concrete configured shape is:**
    ```sh
    gh attestation trusted-root | head -c 4194305 > dist/trusted_root.jsonl
@@ -544,14 +560,15 @@ historical evidence are changed.
    unsigned, and add that release's own dated hosted-evidence section
    recording the real signature/provenance assets, exactly as its existing
    sections record archives today.
-7. **Decide and record identity rotation ownership**: who (which maintainer
-   role) is authorized to edit the trusted identity policy table above, and
-   what review is required before that edit merges. This document does not
-   itself grant that authority to anyone.
+7. **Rotate or revoke only through Wavect GmbH release maintainers**: an
+   identity change requires a reviewed policy revision and a new exact-ID
+   verifier, with old identity acceptance explicitly retired. Offline replay
+   against a historical root cannot prove current trust. This document grants
+   no coding agent independent signing, publication, or policy-approval power.
 
 Items 1-4 are configuration now present in the workflow, including the
-deterministic claim and offline-root release assets; items 5-7 remain
-human-owned. The schemas, identity policy, binding verifier, and source-locked
+deterministic claim and offline-root release assets; hosted publication and
+its evidence review remain human-owned. The schemas, identity policy, binding verifier, and source-locked
 workflow contract make a real hosted signature mechanically checkable rather
 than a fact trusted only from prose. They do not substitute for that hosted
 signature or its review.

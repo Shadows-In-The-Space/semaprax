@@ -7,11 +7,13 @@ Release regression evidence is **HOSTED GREEN** under the
 Audience: compiler contributors, generated-package integrators, and promotion
 reviewers.
 
+In plain terms: this is a small, fixed record API with generated adapters; it is not a general public record feature.
+
 ## Purpose and fixed identifiers
 
-Project v11 exposes the already admitted bounded nested owned-record result
-semantics through one target-neutral public description and two generated host
-adapters. It does not change the source language or reinterpret Project v1-v10.
+Project v11 exposes an already admitted bounded nested owned-record result
+through one target-neutral description and two generated host adapters. It does
+not change the language or reinterpret Project v1-v10.
 
 | Layer | Identifier |
 | --- | --- |
@@ -22,9 +24,9 @@ adapters. It does not change the source language or reinterpret Project v1-v10.
 | npm carrier | `semaprax.project-npm-build.v10` |
 | Rust SDK manifest | `semaprax.native-rust-nested-owned-record-sdk.v1` |
 
-The canonical manifest has the same eight ordered assignments and bounds as
-Project v9. Schema and profile select each other exactly. No earlier schema may
-select this profile, and v11 may not select an earlier profile.
+The canonical manifest keeps Project v9's eight ordered assignments and bounds.
+Schema and profile select each other: earlier schemas cannot select this profile,
+and v11 cannot select an earlier one.
 
 ## Closed admission
 

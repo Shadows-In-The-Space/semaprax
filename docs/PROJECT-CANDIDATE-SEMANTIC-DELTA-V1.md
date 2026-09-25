@@ -8,9 +8,10 @@ separately gated.
 
 Audience: compiler maintainers and agents reviewing immutable Project candidates.
 
-Semantic deltas compare actual compiler projections over an immutable
-candidate's original base and final revision. They are descriptive, independently
-recomputable facts, not runtime equivalence proofs or publication authority.
+Semantic deltas compare actual compiler projections of an immutable candidate's
+original base and final revision. The facts can be recomputed independently;
+they describe changes, but do not prove runtime equivalence or grant publication
+authority.
 
 ## API and binding
 
@@ -37,7 +38,7 @@ authored declarations are not discarded by a function-only filter.
 
 Verification first independently replays the complete candidate history and
 canonical candidate evidence. It then recomputes the selected report and compares
-every exact submitted byte. It does not load submitted JSON as HIR or authority.
+every submitted byte. Submitted JSON is not loaded as HIR or authority.
 No interpreter, target executable, test, source write, or publication is invoked.
 
 The additive [Interface Delta v1](PROJECT-CANDIDATE-INTERFACE-DELTA-V1.md)
@@ -114,12 +115,12 @@ Rows bind actual persistent field/type IDs, function IDs, phases, source paths,
 and expression IDs. `read_or_move` deliberately does not infer runtime ownership
 liveness. Whole aggregate reads are not expanded into every leaf.
 
-Reverse closure follows actual local and imported direct calls, including
-contracts and generic template bodies. It reports the direct field-user
-functions and whether the declared test root reaches the selected target or
-one of those users. It does not model external/dynamic callers, path feasibility,
-or execution coverage. The existing candidate test plan is included separately,
-including its conservative fallback reasons; no tests run.
+Reverse closure traces actual local and imported direct calls, including calls
+in contracts and generic template bodies. It lists functions that directly use
+the field and reports whether the declared test root reaches the selected
+target or one of those functions. It does not model external/dynamic callers,
+path feasibility, or execution coverage. The existing candidate test plan and
+its conservative fallback reasons are included separately; no tests run.
 
 Native C11 and structurally validated Core Wasm facts are freshly rederived for
 the complete admitted entry and test closures. Their byte counts, content

@@ -8,11 +8,11 @@ broader product completion remain separately gated.
 
 Audience: compiler contributors, host integrators, and agent-tool authors.
 
-Project Revision Store v1 is an explicitly invoked, content-addressed,
-immutable store for the exact canonical manifest and source inputs already
-owned by one authenticated `project::ProjectRevision`. It is a narrow injected
-library boundary. It is not a default cache, a Project loader bypass, a build
-cache, a daemon capability, or an authority carried by a receipt.
+Project Revision Store v1 stores the exact canonical manifest and source inputs
+of one authenticated `project::ProjectRevision`. Callers explicitly invoke this
+restricted library boundary; entries are immutable and content-addressed. It
+is not a default cache, Project loader bypass, build cache, daemon capability,
+or authority carried by a receipt.
 
 The store is additive. Project Manifest v1-v10, Project Agent Transport v2-v5,
 Workspace, graph, carrier, diagnostic, and target bytes are unchanged.
@@ -46,10 +46,10 @@ authority.
 
 `ProjectRevisionStoreLocator` is likewise opaque and authority-neutral. It
 exposes the same four borrowed subject getters and is prepared without opening
-or observing a store root. It lets a caller retain the deterministic entry
-digest before publication and resolve `SPX-I216` only by calling the ordinary
-fully replayed `load` route. It is not evidence that publication occurred and
-cannot authorize adoption of an existing entry.
+or observing a store root. Callers can retain the deterministic entry digest before publication. To
+resolve `SPX-I216`, they must use the ordinary fully replayed `load` route. The
+locator neither proves publication occurred nor authorizes adoption of an
+existing entry.
 
 `persist` and `load` require an absolute, normalized store root selected by the
 host. The root must already exist as one real directory owned by the process's

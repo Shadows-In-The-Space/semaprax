@@ -11,13 +11,13 @@ Audience: semantic agent clients and compiler contributors.
 `ProjectCandidateDraft::hole_fill_suggestions(expected_draft, hole_id)` derives
 bounded expressions from the selected hole's existing compiler context and
 tries each through ordinary `fill_hole`. It returns only proposals for which
-complete source replay succeeds. Every attempt starts from the same original
-immutable draft; the temporary result is dropped. No proposed fill is selected
-for the user, retained in a session registry or published.
+complete source replay succeeds. Each attempt starts from the same original immutable draft and discards its
+temporary result. The query does not choose a fill for the user, retain one in
+a session registry, or publish it.
 
-This supplies concrete checked proposals beyond the lexical call inventory.
+The result offers checked proposals, not just an inventory of calls in scope.
 It does not solve the intended program or prove a runtime contract. An admitted
-expression can have different behavior from the old expression.
+expression may behave differently from the old one.
 
 ## Proposal grammar and order
 

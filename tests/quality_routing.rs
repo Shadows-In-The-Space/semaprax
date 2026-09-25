@@ -29,9 +29,17 @@ fn profiles_are_deterministic_and_broad_dispatch_files_force_full() {
         "pub fn function_values() {}\n",
     );
     repository.write("src/graph/expression.rs", "pub fn expression() {}\n");
+    repository.write(
+        "src/graph/function_facts.rs",
+        "pub fn function_facts() {}\n",
+    );
     repository.write("src/graph/filesystem.rs", "pub fn filesystem() {}\n");
     repository.write("src/graph/environment.rs", "pub fn environment() {}\n");
     repository.write("src/graph/process.rs", "pub fn process() {}\n");
+    repository.write(
+        "src/graph/session_protocol_facet.rs",
+        "pub fn session_protocol_facet() {}\n",
+    );
     repository.write(
         "src/graph/owned_iterator.rs",
         "pub fn owned_iterator() {}\n",
@@ -43,6 +51,12 @@ fn profiles_are_deterministic_and_broad_dispatch_files_force_full() {
     ));
     assert!(plan.contains(
         "path\tsrc/graph/process.rs\tbroad-compiler-or-graph-dispatch\tfull-workspace\n"
+    ));
+    assert!(plan.contains(
+        "path\tsrc/graph/function_facts.rs\tbroad-compiler-or-graph-dispatch\tfull-workspace\n"
+    ));
+    assert!(plan.contains(
+        "path\tsrc/graph/session_protocol_facet.rs\tbroad-compiler-or-graph-dispatch\tfull-workspace\n"
     ));
     assert!(plan.contains(
         "path\tsrc/graph/owned_iterator.rs\tbroad-compiler-or-graph-dispatch\tfull-workspace\n"

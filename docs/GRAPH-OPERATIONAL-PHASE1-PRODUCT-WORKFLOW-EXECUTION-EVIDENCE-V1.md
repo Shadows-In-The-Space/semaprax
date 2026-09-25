@@ -10,12 +10,11 @@ programme reviewers.
 
 ## Scope
 
-This record owns one closed `function_signature_review_publish_v1` execution.
-It selects the calculator fixture's scalar `calculator.add` signature change,
-the exact review and publication profiles in the capability document, three
-generated client languages, and isolated local Unix bare SHA-256 Git
-repositories. It is evidence for that bounded composition, not general SDK,
-signature-evolution, publication-provider, or Phase 1 support.
+This record covers one `function_signature_review_publish_v1` execution: the
+calculator fixture's scalar `calculator.add` signature change, exact review and
+publication profiles, three generated client languages, and isolated local Unix
+bare SHA-256 Git repositories. It does not prove general SDK, signature-evolution,
+publication-provider, or Phase 1 support.
 
 The owning contract is [Supported graph-operational product workflow
 v1](IMAGE-SUPPORTED-PRODUCT-WORKFLOW-V1.md).

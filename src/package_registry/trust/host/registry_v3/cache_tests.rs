@@ -130,7 +130,7 @@ fn wrong_generation_lock_registry_and_time_fail_before_cache_creation() {
             1 => input.lock = "{}",
             2 => input.registry = &yanked.admitted.0,
             3 => input.trusted_time = 99,
-            _ => input.trusted_time = 300,
+            _ => input.trusted_time = f.expired_time(),
         };
         assert!(store.populate_resolver_cache(&cache, &input).is_err());
         assert!(!cache.exists());

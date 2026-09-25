@@ -966,7 +966,7 @@ pub(super) fn expected_release_identity(
         issuer: TRUSTED_ISSUER.to_owned(),
         repository: TRUSTED_REPOSITORY.to_owned(),
         workflow_path: TRUSTED_WORKFLOW_PATH.to_owned(),
-        subject: format!("repo:{TRUSTED_REPOSITORY}:ref:refs/tags/{tag}"),
+        subject: format!("{TRUSTED_OIDC_SUBJECT_PREFIX}:ref:refs/tags/{tag}"),
         workflow_ref: format!("{TRUSTED_REPOSITORY}/{TRUSTED_WORKFLOW_PATH}@refs/tags/{tag}"),
         tag,
     })

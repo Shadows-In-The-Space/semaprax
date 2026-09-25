@@ -137,6 +137,7 @@ fn hir_capacity_layout_constants_are_bound_to_root_const_assertions() {
         include_str!("../../../../../src/hir/owned_result_try.rs"),
         include_str!("../../../../../src/hir/resolve_class.rs"),
         include_str!("../../../../../src/hir/resolve_expr.rs"),
+        include_str!("../../../../../src/hir/resolve_expr/capacity.rs"),
         include_str!("../../../../../src/hir/resolve_box_call.rs"),
         include_str!("../../../../../src/hir/resolve_box_call/iterator.rs"),
         include_str!("../../../../../src/hir/resolve_vec_call.rs"),

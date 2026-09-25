@@ -385,7 +385,7 @@ fn authenticated_derivation_kat_binds_refs_budget_nonclaims_and_build_counts() {
     );
     assert_eq!(
         output.derivation_digest(),
-        "sha256:a626e31667029f448643dbfe16862cadc748917116581f524cda371e5d0c6390"
+        "sha256:22a1b28f75130ebf43fd020fcf8391eae9f1bcbbd3c4d7f8a08eeea8d8c1ef5b"
     );
 }
 

@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-SHARDS = ("unit", "integration-0", "integration-1", "integration-2", "integration-3")
+SHARDS = ("unit", "integration-0", "integration-1", "integration-2", "integration-3", "integration-4")
 TEST = ["cargo", "test", "--locked", "--workspace", "--all-features"]
 
 
@@ -142,7 +142,7 @@ def main(argv=None):
     if (
         sys.platform == "darwin"
         and args.label == "Rust macOS"
-        and args.shard == "integration-2"
+        and any(target["name"] == "project" for target in shard["targets"])
     ):
         # macOS /usr/bin/git is an xcrun shim. The bounded Git publication
         # fixtures clear their environment, and concurrent shim invocations can

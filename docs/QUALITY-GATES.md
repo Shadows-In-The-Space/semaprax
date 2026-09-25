@@ -114,7 +114,7 @@ physical host gates, and release-profile settings. This saves build cost; it
 does not narrow coverage.
 
 On Linux, macOS, and Windows, the current-toolchain Rust lane runs the same
-closed four-way Cargo target inventory: one lib/bin shard and three parallel
+closed six-way Cargo target inventory: one lib/bin shard and five parallel
 integration-target shards. Each host keeps focused runtime tests, sanitizers,
 and physical-platform gates in a separate blocking evidence job.
 Formatting, Clippy, doctests, rustdoc, release builds, packaging, and examples
@@ -125,16 +125,18 @@ exclusion against Cargo metadata instead of accepting a free-form omitted
 target. Unknown target kinds or package exclusions fail closed. The release
 gate requires all three matrices.
 
-The Rust 1.88 minimum-version lane uses `scripts/ci-msrv.py` to split the
-complete Cargo workspace inventory into one lib/bin and three integration
-shards. Every shard keeps workspace-wide feature unification, locked
-dependencies, and the workflow's 360-minute job limit. Only the unit shard
-runs the whole-workspace all-targets/all-features check; repeating it in
-integration shards would add no target coverage. Fail-fast is off so every
-shard reports after a peer failure. Shared integration target names stay together;
-unknown target kinds fail closed instead of silently losing coverage. The
-release gate requires the complete matrix. This changes scheduling only, not
-the local `full` profile or any test, admission limit, or release requirement.
+The source Agent lifecycle suite runs once in the sharded matrix. The separate
+Rust evidence job runs only the provisioned Proposal-client case under its
+explicit environment flag; repeating the entire Agent Runtime harness there
+previously consumed the six-hour job limit. The `project` and
+`agent_runtime_v1` harnesses occupy different integration shards.
+
+The Rust 1.88 minimum-version lane checks every workspace target and feature
+combination once with the locked dependency graph. Runtime suites run on the
+current compiler across Linux, macOS, and Windows; repeating all of them on
+1.88 added no target or operating-system coverage. The release gate still
+requires the minimum-version check. Local `full` verification and runtime
+admission limits are unchanged.
 
 ## Kernel-0 Lean proof gate
 

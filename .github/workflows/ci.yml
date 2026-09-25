@@ -1410,10 +1410,6 @@ jobs:
         run: cargo fetch --locked
       - name: Fetch the standalone owned-data Rust setup dependency closure
         run: cargo fetch --locked --manifest-path examples/owned-data-rust/Cargo.toml
-      - name: Execute source Agent lifecycle
-        if: runner.os == 'Linux'
-        run: |
-          cargo test --locked --offline -p semaprax --test agent_runtime_v1 source_agent_lifecycle:: -- --nocapture
       - name: Require nested generic-owned relay and forwarding on every internal backend
         if: runner.os == 'Linux'
         env:
@@ -1549,7 +1545,7 @@ jobs:
           # returns before its body unless this is set, so without it that
           # test has never executed anywhere -- it passed by skipping.
           SEMAPRAX_REQUIRE_AGENT_PROPOSAL_CLIENTS: "1"
-        run: cargo test --locked -p semaprax --test agent_runtime_v1 -- --nocapture
+        run: cargo test --locked -p semaprax --test agent_runtime_v1 agent_proposal_client_execution::generated_proposal_clients_compile_execute_and_round_trip -- --exact --nocapture
       - name: Require private Economic Agent deterministic fake-host evidence
         run: cargo test --locked -p semaprax --lib economic_agent::tests -- --nocapture
       - name: Require private Economic Agent durable marker process-termination evidence
@@ -1765,7 +1761,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        shard: [unit, integration-0, integration-1, integration-2, integration-3]
+        shard: [unit, integration-0, integration-1, integration-2, integration-3, integration-4]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Allow Windows to check out long evidence paths
@@ -1877,6 +1873,16 @@ jobs:
             cargo fetch --locked --manifest-path platform-tests/component-runtime/Cargo.toml
             cargo fetch --locked --manifest-path platform-tests/public-scalar-wit-interface/Cargo.toml
           fi
+      - name: Hold explicit native and Wasm test hosts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $clang = (Get-Command clang.exe -ErrorAction Stop).Source
+          $node = (Get-Command node.exe -ErrorAction Stop).Source
+          if (-not [System.IO.Path]::IsPathFullyQualified($clang)) { throw "clang path is not absolute" }
+          if (-not [System.IO.Path]::IsPathFullyQualified($node)) { throw "node path is not absolute" }
+          "SEMAPRAX_TEST_NATIVE_STAGE_CLANG=$clang" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SEMAPRAX_TEST_WASM_STAGE_NODE=$node" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Test the complete workspace target shard (Unix)
         if: runner.os != 'Windows'
         env:
@@ -2233,17 +2239,13 @@ jobs:
       CARGO_PROFILE_TEST_OPT_LEVEL: "1"
       CARGO_INCREMENTAL: "0"
       CARGO_BUILD_JOBS: "1"
-    name: Rust 1.88 minimum (${{ matrix.shard }})
+    name: Rust 1.88 minimum
     runs-on: ubuntu-latest
-    # The same sharded workspace command `verify-tests` runs on an older
-    # toolchain. The v0.6.0 tag run reached four hours in several still-active
-    # shards, so both matrices use modest test optimization and the hosted
-    # six-hour job bound without dropping any target or assertion.
-    timeout-minutes: 360
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [unit, integration-0, integration-1, integration-2, integration-3]
+    # Rust 1.88 compatibility is a compile contract. Runtime behavior is
+    # exercised on the current toolchain in the three-host verify-tests matrix;
+    # running those entire suites again here multiplied release latency without
+    # adding a platform or a feature combination.
+    timeout-minutes: 180
     steps:
       - name: Allow Windows to check out long evidence paths
         shell: bash
@@ -2264,11 +2266,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: "1.88"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-      - name: Install TypeScript compiler for cross-language suite
-        run: npm install -g typescript@5.8.3
       - name: Resolve the real held rustc image (Unix)
         shell: bash
         run: echo "RUSTC=$(rustup which rustc)" >> "$GITHUB_ENV"
@@ -2278,13 +2275,8 @@ jobs:
           sudo apt-get install --yes --no-install-recommends libcurl4-openssl-dev
       - name: Fetch the complete locked workspace dependency closure
         run: cargo fetch --locked
-      - name: Fetch the standalone owned-data Rust setup dependency closure
-        run: cargo fetch --locked --manifest-path examples/owned-data-rust/Cargo.toml
       - name: Check every workspace target once on the minimum toolchain
-        if: matrix.shard == 'unit'
         run: cargo check --locked --workspace --all-targets --all-features
-      - name: Test the complete workspace target shard
-        run: python3 scripts/ci-msrv.py --shard "${{ matrix.shard }}"
 
   release-gate:
     name: Release gate

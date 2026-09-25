@@ -167,7 +167,7 @@ gh api repos/wavect/semaprax/commits/main/check-runs \
 | `native-rust-sdk-v1` | `Public Native Rust SDK v1 (ubuntu-latest \| macos-latest \| windows-latest)` | 3 |
 | `verify` | `Rust ubuntu-latest`, `Rust macos-latest`, `Rust windows-latest` | 3 |
 | `verify-build` | `Rust build ubuntu-latest`, `Rust build macos-latest`, `Rust build windows-latest` | 3 |
-| `verify-tests` | `Rust tests <os> (unit \| integration-0 \| integration-1 \| integration-2)` over the three hosts | 12 |
+| `verify-tests` | `Rust tests <os> (unit \| integration-0 \| integration-1 \| integration-2 \| integration-3 \| integration-4)` over the three hosts | 18 |
 | `desktop-native-product` | `Private desktop + native UI product (windows-2025 \| macos-15)` | 2 |
 | `doctor-macos-confinement` | `Doctor macOS Seatbelt confinement and settlement` | 1 |
 | `ios-static-cross-check` | `Private iOS static loader + host runtime` | 1 |
@@ -176,13 +176,13 @@ gh api repos/wavect/semaprax/commits/main/check-runs \
 | `android-jni-app-cross-check` | `Private Android JNI/Kotlin application runtime (x86_64 \| arm64-v8a)` | 2 |
 | `callable-host-sanitizers` | `Callable host ASan + UBSan` | 1 |
 | `rust-host-address-sanitizer` | `Rust host ASan (nightly-2026-07-16)` | 1 |
-| `msrv` | `Rust 1.88 minimum (unit \| integration-0 \| integration-1 \| integration-2)` | 4 |
+| `msrv` | `Rust 1.88 minimum` | 1 |
 | `release-gate` | **`Release gate`** | 1 |
 
 The authored workflow additionally includes the three AGENT-06 client contexts
-and the GEN-05B closure context. With `verify-build`, it declares 53 blocking
-contexts plus the aggregate; the new build and library-depth contexts await
-hosted execution. The public generic ownership milestone context has since
+and the GEN-05B closure context. The expanded context inventory changes when
+the matrix changes; the aggregate remains the stable required check. The
+public generic ownership milestone context has since
 run hosted (three-host `success`, commit `7def8fb1…`, run
 [35433295593](https://github.com/wavect/semaprax/actions/runs/35433295593));
 that commit is not a `#164`-frozen candidate, so it does not by itself

@@ -47,10 +47,9 @@ pub fn write_project(root: &Path, byte_len: usize) -> PathBuf {
         let path = root.join("src").join(name);
         let parsed = semaprax::parse(source, &path).unwrap();
         let canonical = semaprax::format::canonical(&parsed);
-        assert_eq!(
-            semaprax::format::canonical(&semaprax::parse(&canonical, &path).unwrap()),
-            canonical
-        );
+        // Project admission parses the canonical file again. A second
+        // formatter round-trip here repeated the 65 KiB literal parse for
+        // every boundary without testing a distinct capacity condition.
         write_new(&path, canonical.as_bytes());
     }
     manifest

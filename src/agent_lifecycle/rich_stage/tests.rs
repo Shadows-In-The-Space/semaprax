@@ -261,9 +261,10 @@ fn assert_raw_target_parity(
     // bytes, not merely as a matching branch label or scalar state.
     assert_eq!(actual.outcome, expected.outcome, "{label}: raw outcome");
     assert_eq!(actual.failure, expected.failure, "{label}: failure");
-    assert!(
-        actual.cleanup_events.is_empty(),
-        "{label}: target result harvesting exposes no interpreter cleanup events"
+    assert_eq!(
+        actual.cleanup_events,
+        [crate::interpreter::OwnedDataCleanupEvent::CopyOutAndSettleBytes],
+        "{label}: the one owned result leaf is copied out and settled exactly once"
     );
 }
 

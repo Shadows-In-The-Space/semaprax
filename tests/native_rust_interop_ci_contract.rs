@@ -1088,10 +1088,11 @@ fn hosted_workflow_names_all_private_interop_evidence_boundaries() {
     let msrv_fetch = msrv_job
         .find("- name: Fetch the complete locked workspace dependency closure")
         .expect("minimum Rust dependency fetch");
-    let msrv_tests = msrv_job
-        .find("python3 scripts/ci-msrv.py --shard \"${{ matrix.shard }}\"")
-        .expect("minimum Rust exhaustive workspace target shard");
-    assert!(msrv_fetch < msrv_tests);
+    let msrv_check = msrv_job
+        .find("cargo check --locked --workspace --all-targets --all-features")
+        .expect("minimum Rust exhaustive workspace target check");
+    assert!(msrv_fetch < msrv_check);
+    assert!(!msrv_job.contains("python3 scripts/ci-msrv.py --shard"));
     let windows_environment = workflow
         .split("- name: Resolve the authenticated Windows SDK and MSVC environment")
         .nth(1)

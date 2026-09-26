@@ -52,18 +52,6 @@ fn identity_prebound_preserves_every_legacy_accepted_receipt() {
         old
     );
 }
-fn with_builder_limit(limit: usize, run: impl FnOnce()) {
-    assert!(limit <= super::super::MAX_BUILDER_BYTES);
-    struct Restore(usize);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            super::super::ACTIVE_BUILDER_LIMIT.with(|active| active.set(self.0));
-        }
-    }
-    let _restore = Restore(super::super::ACTIVE_BUILDER_LIMIT.with(|active| active.replace(limit)));
-    run();
-}
-
 #[test]
 fn identity_prebound_excludes_reverse_dependent_names_only_after_refusal() {
     let programs = fixture(310, 220, true);

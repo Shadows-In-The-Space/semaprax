@@ -1,17 +1,15 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use super::{
+    bind_rich_proposal_stages, run_rich_turn, run_rich_turn_on, RichProposalStages,
+    RichStageBackend, RichTurnOutcome,
+};
 use crate::agent_runtime::AgentCancellation;
 use crate::hir::DeclarationId;
 use crate::interpreter::retained_call::{
     PreparedRetainedCall, RetainedCallEvaluation, RetainedCallOutcome, RetainedField,
     RetainedRecord, RetainedValue,
-};
-use crate::interpreter::OwnedDataCleanupEvent;
-
-use super::{
-    bind_rich_proposal_stages, run_rich_turn, run_rich_turn_on, RichProposalStages,
-    RichStageBackend, RichTurnOutcome,
 };
 
 // NOTE on scope: Proposal here is a genuinely multi-field record crossing
@@ -256,7 +254,6 @@ fn assert_raw_target_parity(
     label: &str,
     expected: &RetainedCallEvaluation,
     actual: &RetainedCallEvaluation,
-    expected_cleanup: &[OwnedDataCleanupEvent],
 ) {
     // This is deliberately before `run_rich_turn_on` reduces the variants to
     // a turn outcome: raw grant seals and Continue markers must be equal as
@@ -342,36 +339,21 @@ fn rich_target_backends_preserve_raw_grant_and_continue_byte_payloads() {
         RetainedValue::Bytes(vec![3, 4])
     );
 
-    // Native reports one post-receipt copy-out settlement for the returned
-    // seal/marker, not the callee's input cleanup. Core Wasm does not expose
-    // cleanup events. Keep both exact contracts; neither is full trace parity.
-    let native_cleanup = [OwnedDataCleanupEvent::CopyOutAndSettleBytes];
-    for (target, backend, expected_cleanup) in [
-        (
-            "native -O0",
-            RichStageBackend::Native(&native_host),
-            native_cleanup.as_slice(),
-        ),
+    for (target, backend) in [
+        ("native -O0", RichStageBackend::Native(&native_host)),
         (
             "native -O2",
             RichStageBackend::NativeOptimized(&native_host),
-            native_cleanup.as_slice(),
         ),
-        ("Core Wasm", RichStageBackend::Wasm, &[]),
+        ("Core Wasm", RichStageBackend::Wasm),
     ] {
         let actual_decision = raw_stage(&stages, backend, &stages.authorize, &authorize_args);
-        assert_raw_target_parity(
-            &format!("{target}: authorize"),
-            &decision,
-            &actual_decision,
-            expected_cleanup,
-        );
+        assert_raw_target_parity(&format!("{target}: authorize"), &decision, &actual_decision);
         let actual_transition = raw_stage(&stages, backend, &stages.reduce, &reduce_args);
         assert_raw_target_parity(
             &format!("{target}: reduce"),
             &transition,
             &actual_transition,
-            expected_cleanup,
         );
     }
 }

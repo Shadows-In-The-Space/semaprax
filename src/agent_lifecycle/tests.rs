@@ -578,6 +578,7 @@ pub(super) fn test_wasm_stage_host() -> &'static authorization::WasmStageHost {
             .expect("Core Wasm tests require an explicit absolute Node fixture path")
     })
 }
+
 pub(in crate::agent_lifecycle) fn native_backend(
     host: &authorization::NativeStageHost,
 ) -> authorization::StageBackend<'_> {

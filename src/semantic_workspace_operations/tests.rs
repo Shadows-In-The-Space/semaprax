@@ -320,7 +320,7 @@ fn derivation_wrapper_binds_exact_retained_proposals_and_fixed_point_usage() {
     );
     assert!(output.derivation().ends_with('\n'));
 }
-// b740e4ed changed only max_managed_files (16 -> 32) in this derivation.
+
 #[test]
 fn authenticated_derivation_kat_binds_refs_budget_nonclaims_and_build_counts() {
     let fixture = ManagedOperationsFixture::new("derivation-kat");

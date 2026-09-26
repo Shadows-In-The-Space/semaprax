@@ -56,7 +56,6 @@ fn identity_prebound_preserves_every_legacy_accepted_receipt() {
 fn identity_prebound_excludes_reverse_dependent_names_only_after_refusal() {
     let programs = fixture(310, 220, true);
     let authored = super::super::index_authored(&programs).unwrap();
-
     assert!(dependency_identity_max(&programs[0], &authored, &programs).unwrap() < 100);
     let unscoped = retention_prebound(&programs, &authored, false).unwrap().1;
     let scoped = retention_prebound(&programs, &authored, true).unwrap().1;

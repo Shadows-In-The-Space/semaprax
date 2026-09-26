@@ -1989,7 +1989,7 @@ mod tests {
         )
         .unwrap();
     }
-    // fe2ac68e replay: only 636744fa/b740e4ed limits and dependent digests changed.
+
     #[test]
     fn whole_document_kats_keys_domains_refs_paths_and_fixed_point_are_exact() {
         let prepared = prepared();

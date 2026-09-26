@@ -774,10 +774,18 @@ module graph.v14;
             "sha256:{:x}",
             crate::digest_hex::LowerHex(Sha256::digest(json.as_bytes()))
         );
-        // Independently recovered the fe2ac68e KAT by restoring only the limits
-        // changed by 636744fa/b740e4ed: builder bytes 18 -> 64 MiB and managed/
-        // reachable files 16 -> 32, then replaying the graph digest. Used budgets,
-        // source/schema/identity facts and wire order are unchanged.
+        // Includes the current AST carrier's charged builder bytes, so the
+        // digest moves whenever the pre-bound moves: adding the static
+        // implementation Vec grew Program by 24 bytes on 64-bit hosts, and the
+        // split pre-bound now charges structural bytes 24 times, string
+        // contents 64 times, and per-shape identity slots instead of 64
+        // footprints and eight slots for every node, and an imported function
+        // is now charged as the stub the projection retains instead of as a
+        // second copy of the provider's contract and body, and issue #83
+        // re-derived the identity copy factor from 64 to 16. Only
+        // `used_builder_bytes` and the digest over it move; every other field
+        // of the rendered document is byte for byte identical. Wire-order and
+        // independent replay below remain exact.
         assert_eq!(
             document_sha,
             "sha256:ddf1c68643f6e5f451be11a368a884b99bf97b7ee6755e25b129ceb27ad9e8ca"

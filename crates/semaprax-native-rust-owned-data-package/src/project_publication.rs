@@ -39,8 +39,8 @@ enum SourceInventory {
 }
 
 enum RootInventory {
-    Basic(platform::PreparedDiscardInventory<3>),
-    Service(platform::PreparedDiscardInventory<6>),
+    Basic(Box<platform::PreparedDiscardInventory<3>>),
+    Service(Box<platform::PreparedDiscardInventory<6>>),
 }
 
 impl RootInventory {
@@ -155,14 +155,14 @@ impl NewProjectAuthority {
         let source_name = platform::prepare_stage_name(OsStr::new("src")).map_err(map_invalid)?;
         let empty = platform::prepare_discard_inventory([]).map_err(map_invalid)?;
         let root = match template {
-            TemplateInventory::Service => RootInventory::Service(
+            TemplateInventory::Service => RootInventory::Service(Box::new(
                 platform::prepare_discard_inventory(SERVICE_ROOT_NAMES.map(OsStr::new))
                     .map_err(map_invalid)?,
-            ),
-            _ => RootInventory::Basic(
+            )),
+            _ => RootInventory::Basic(Box::new(
                 platform::prepare_discard_inventory(ROOT_NAMES.map(OsStr::new))
                     .map_err(map_invalid)?,
-            ),
+            )),
         };
         let source_files = match template {
             TemplateInventory::Library => SourceInventory::Library(
